@@ -101,10 +101,18 @@ export async function chooseTarget(targets, provided) {
         message: "选择服务/工作负载",
         pageSize: 15,
         choices: targets.map((target) => ({
-            name: `${target.name}  ${target.kind}`,
+            name: formatTargetChoice(target),
             value: target
         }))
     });
+}
+export function formatTargetChoice(target) {
+    if (target.kind !== "Deployment") {
+        return `${target.name}  服务(Service)`;
+    }
+    const desired = target.desiredReplicas ?? 0;
+    const ready = target.readyReplicas ?? 0;
+    return `${target.name}  工作负载(Deployment)  副本 ${ready}/${desired}`;
 }
 export async function choosePod(pods, provided) {
     if (provided) {

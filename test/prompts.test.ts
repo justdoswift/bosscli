@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { preferredNamespace } from "../src/prompts.js";
+import { formatTargetChoice, preferredNamespace } from "../src/prompts.js";
 
 describe("prompts", () => {
   it("prefers tax-digital when it is available", () => {
@@ -9,5 +9,29 @@ describe("prompts", () => {
 
   it("falls back to the first namespace when tax-digital is unavailable", () => {
     expect(preferredNamespace(["default", "kubesphere-system"])).toBe("default");
+  });
+
+  it("shows deployment replica counts in target choices", () => {
+    expect(
+      formatTargetChoice({
+        kind: "Deployment",
+        name: "tax-data-extraction-server",
+        namespace: "tax-digital",
+        selector: { app: "tax-data-extraction-server" },
+        desiredReplicas: 0,
+        readyReplicas: 0
+      })
+    ).toBe("tax-data-extraction-server  工作负载(Deployment)  副本 0/0");
+  });
+
+  it("shows service choices with a localized label", () => {
+    expect(
+      formatTargetChoice({
+        kind: "Service",
+        name: "tax-invoice-business-server",
+        namespace: "tax-digital",
+        selector: { app: "tax-invoice-business-server" }
+      })
+    ).toBe("tax-invoice-business-server  服务(Service)");
   });
 });

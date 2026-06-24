@@ -13,7 +13,7 @@ const program = new Command();
 program
     .name("kslog")
     .description("KubeSphere 日志下载 CLI")
-    .version("0.3.2");
+    .version("0.3.3");
 addConnectionOptions(program);
 addDownloadOptions(program);
 program.action(async (options) => {
@@ -136,14 +136,14 @@ async function chooseKubeTarget(client, options) {
     const namespace = await chooseNamespace(namespaces, options.namespace);
     const targets = await client.listTargets(namespace);
     if (targets.length === 0) {
-        throw new Error(`namespace ${namespace} 中没有可选择的 Service/Deployment`);
+        throw new Error(`namespace ${namespace} 中没有可选择的服务/工作负载`);
     }
     const target = options.service
         ? await client.resolveTarget(namespace, options.service)
         : await chooseTarget(targets);
     const pods = await client.listPodsForTarget(target);
     if (pods.length === 0) {
-        throw new Error(`${target.kind} ${target.name} 没有匹配的 Pod`);
+        throw new Error(buildNoPodsMessage(target));
     }
     const pod = await choosePod(pods, options.pod);
     if (pod.containers.length === 0) {
@@ -155,6 +155,13 @@ async function chooseKubeTarget(client, options) {
         pod,
         container: await chooseContainer(pod.containers, options.container)
     };
+}
+function buildNoPodsMessage(target) {
+    if (target.kind === "Deployment" && (target.desiredReplicas ?? 0) === 0) {
+        return `工作负载 ${target.name} 当前副本数为 0，没有可进入的 Pod；请先扩容，或切换到有运行 Pod 的环境`;
+    }
+    const targetKind = target.kind === "Deployment" ? "工作负载" : "服务";
+    return `${targetKind} ${target.name} 没有匹配的 Pod`;
 }
 async function runCurrentDownload(client, options, namespace, target, pod, container) {
     const range = await chooseLogRange({

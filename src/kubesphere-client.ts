@@ -64,9 +64,14 @@ interface KubeService {
 interface KubeDeployment {
   metadata?: KubeObjectMeta;
   spec?: {
+    replicas?: number;
     selector?: {
       matchLabels?: Record<string, string>;
     };
+  };
+  status?: {
+    readyReplicas?: number;
+    availableReplicas?: number;
   };
 }
 
@@ -204,7 +209,10 @@ export class KubeSphereClient {
         kind: "Deployment",
         name,
         namespace,
-        selector
+        selector,
+        desiredReplicas: deployment.spec?.replicas ?? 0,
+        readyReplicas: deployment.status?.readyReplicas ?? 0,
+        availableReplicas: deployment.status?.availableReplicas ?? 0
       });
     }
 

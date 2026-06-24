@@ -15,6 +15,9 @@ export interface KubeTarget {
   name: string;
   namespace: string;
   selector: Record<string, string>;
+  desiredReplicas?: number;
+  readyReplicas?: number;
+  availableReplicas?: number;
 }
 
 export interface PodSummary {

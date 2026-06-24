@@ -18,6 +18,7 @@ export declare function promptNewProfileName(existingNames: string[]): Promise<s
 export declare function preferredNamespace(namespaces: string[], preferred?: string): string | undefined;
 export declare function chooseNamespace(namespaces: string[], provided?: string): Promise<string>;
 export declare function chooseTarget(targets: KubeTarget[], provided?: string): Promise<KubeTarget>;
+export declare function formatTargetChoice(target: KubeTarget): string;
 export declare function choosePod(pods: PodSummary[], provided?: string): Promise<PodSummary>;
 export declare function chooseContainer(containers: string[], provided?: string): Promise<string>;
 export declare function chooseLogRange(options: {
