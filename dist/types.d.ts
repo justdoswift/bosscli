@@ -1,0 +1,78 @@
+export type CookieJar = Map<string, string>;
+export interface ClientOptions {
+    baseUrl: string;
+    insecure?: boolean;
+}
+export interface LoginConfig {
+    encryptKey: string;
+    version?: string;
+}
+export interface KubeTarget {
+    kind: "Service" | "Deployment";
+    name: string;
+    namespace: string;
+    selector: Record<string, string>;
+}
+export interface PodSummary {
+    name: string;
+    namespace: string;
+    phase: string;
+    ready: string;
+    restartCount: number;
+    containers: string[];
+    nodeName?: string;
+}
+export interface LogRange {
+    mode: "all" | "tail" | "since";
+    tailLines?: number;
+    sinceSeconds?: number;
+}
+export interface DownloadLogOptions {
+    namespace: string;
+    pod: string;
+    container: string;
+    range: LogRange;
+    outputPath: string;
+    timestamps?: boolean;
+    onProgress?: (bytes: number) => void;
+}
+export type LogSource = "current" | "history";
+export interface ExecOptions {
+    namespace: string;
+    pod: string;
+    container: string;
+    command: string[];
+    timeoutMs?: number;
+}
+export interface ExecResult {
+    stdout: string;
+    stderr: string;
+    error: string;
+}
+export interface StreamExecOptions extends ExecOptions {
+    onStdout?: (chunk: Buffer) => void | Promise<void>;
+    onStderr?: (chunk: Buffer) => void | Promise<void>;
+    onErrorChannel?: (chunk: Buffer) => void | Promise<void>;
+}
+export interface SavedProfile {
+    name: string;
+    url: string;
+    username: string;
+    password: string;
+    insecure: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface ProfilesFile {
+    defaultProfile?: string;
+    profiles: SavedProfile[];
+}
+export interface DateSelection {
+    from: string;
+    to: string;
+    dates: string[];
+}
+export interface HistoryLogFile {
+    path: string;
+    size?: number;
+}

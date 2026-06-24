@@ -1,0 +1,23 @@
+node_modules/
+
+# Local credentials, downloaded logs, and smoke-test artifacts.
+work/
+outputs/
+*.log
+*.cookie
+*.cookies
+
+# Local environment and editor noise.
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+
+# Test/build cache and local package archives.
+coverage/
+.cache/
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
