@@ -5,21 +5,28 @@ import {
   buildLeqiExecCurlCommand,
   buildLeqiInvokePayload,
   formatLeqiApiChoice,
+  listLeqiApis,
   parseReqDtoJson
 } from "../src/leqi.js";
-import type { LeqiApiInfo } from "../src/types.js";
 
-const api: LeqiApiInfo = {
-  apiIdentity: "200000001",
-  apiName: "授信额度查询",
-  remarks: "授信额度查询"
-};
+const api = listLeqiApis().find((item) => item.apiIdentity === "200000001");
 
 describe("leqi", () => {
+  it("loads the embedded interface snapshot", () => {
+    const apis = listLeqiApis();
+
+    expect(apis).toHaveLength(131);
+    expect(api).toMatchObject({
+      apiIdentity: "200000001",
+      apiName: "下载退回授信额度"
+    });
+  });
+
   it("builds invoke payloads", () => {
+    expect(api).toBeDefined();
     expect(
       buildLeqiInvokePayload({
-        api,
+        api: api as NonNullable<typeof api>,
         taxPayerNo: "91150100397352740W",
         testMode: 0,
         reqDTO: { sqed: 20000000 }
@@ -33,8 +40,9 @@ describe("leqi", () => {
   });
 
   it("builds copyable curl commands", () => {
+    expect(api).toBeDefined();
     const payload = buildLeqiInvokePayload({
-      api,
+      api: api as NonNullable<typeof api>,
       taxPayerNo: "91150100397352740W",
       testMode: 0,
       reqDTO: { sqlx: "1" }
@@ -46,8 +54,9 @@ describe("leqi", () => {
   });
 
   it("builds exec curl commands", () => {
+    expect(api).toBeDefined();
     const payload = buildLeqiInvokePayload({
-      api,
+      api: api as NonNullable<typeof api>,
       taxPayerNo: "91150100397352740W",
       testMode: 0,
       reqDTO: {}
@@ -66,6 +75,7 @@ describe("leqi", () => {
   });
 
   it("formats api choices", () => {
-    expect(formatLeqiApiChoice(api)).toBe("200000001  授信额度查询");
+    expect(api).toBeDefined();
+    expect(formatLeqiApiChoice(api as NonNullable<typeof api>)).toBe("200000001  下载退回授信额度");
   });
 });

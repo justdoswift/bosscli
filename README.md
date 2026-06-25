@@ -161,21 +161,7 @@ workctl history \
 workctl leqi
 ```
 
-接口列表从 `tax_leqi_api_info` 读取，默认库连接信息为：
-
-```text
-host: 192.168.7.195
-port: 3306
-user: root
-database: lxzsdb
-```
-
-数据库密码不会写进仓库。可以通过环境变量传入，或运行时按提示输入：
-
-```bash
-export WORKCTL_LEQI_DB_PASSWORD="..."
-workctl leqi
-```
+接口列表使用内置快照，来源是 `lxzsdb.tax_leqi_api_info` 中当前启用的 131 条接口。运行时不会连接 MySQL，也不会询问接口库密码；如果接口表有变化，更新快照并发布新版本即可。
 
 选择接口后会填写 `taxPayerNo/testMode/reqDTO`，默认操作是导出可复制 curl。也可以直达：
 

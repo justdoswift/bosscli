@@ -50,15 +50,10 @@ import {
   buildLeqiCurl,
   buildLeqiExecCurlCommand,
   buildLeqiInvokePayload,
-  DEFAULT_LEQI_DB_HOST,
-  DEFAULT_LEQI_DB_NAME,
-  DEFAULT_LEQI_DB_PORT,
-  DEFAULT_LEQI_DB_USER,
   DEFAULT_LEQI_ENDPOINT,
   DEFAULT_LEQI_RUNNER_WORKLOAD,
   DEFAULT_LEQI_TAX_PAYER_NO,
-  listLeqiApis,
-  type LeqiDbOptions
+  listLeqiApis
 } from "./leqi.js";
 
 interface ConnectionOptions {
@@ -99,11 +94,6 @@ interface LeqiOptions extends ConnectionOptions {
   runnerWorkload?: string;
   pod?: string;
   container?: string;
-  dbHost?: string;
-  dbPort?: number;
-  dbUser?: string;
-  dbPassword?: string;
-  dbName?: string;
 }
 
 const program = new Command();
@@ -111,7 +101,7 @@ const program = new Command();
 program
   .name("workctl")
   .description("日常工作工具集 CLI")
-  .version("0.5.0");
+  .version("0.5.1");
 
 addConnectionOptions(program);
 addDownloadOptions(program);
@@ -251,12 +241,7 @@ function addLeqiOptions(command: Command): void {
     .option("-n, --namespace <namespace>", "执行调用的 namespace")
     .option("--runner-workload <workload>", "执行 curl 的工作负载", DEFAULT_LEQI_RUNNER_WORKLOAD)
     .option("--pod <pod>", "执行 curl 的 Pod 名称")
-    .option("-c, --container <container>", "执行 curl 的容器名称")
-    .addOption(new Option("--db-host <host>", "乐企接口库地址").env("WORKCTL_LEQI_DB_HOST"))
-    .addOption(new Option("--db-port <port>", "乐企接口库端口").env("WORKCTL_LEQI_DB_PORT").argParser(parsePositiveInteger))
-    .addOption(new Option("--db-user <user>", "乐企接口库用户名").env("WORKCTL_LEQI_DB_USER"))
-    .addOption(new Option("--db-password <password>", "乐企接口库密码").env("WORKCTL_LEQI_DB_PASSWORD"))
-    .addOption(new Option("--db-name <database>", "乐企接口库名").env("WORKCTL_LEQI_DB_NAME"));
+    .option("-c, --container <container>", "执行 curl 的容器名称");
 }
 
 function mergeCommandOptions<T extends object>(options: T, command: Command): T {
@@ -283,8 +268,7 @@ async function runDownloadFlow(options: DownloadOptions): Promise<void> {
 }
 
 async function runLeqiFlow(options: LeqiOptions): Promise<void> {
-  const dbOptions = await resolveLeqiDbOptions(options);
-  const apis = await listLeqiApis(dbOptions);
+  const apis = listLeqiApis();
   const api = await chooseLeqiApi(apis, options.api);
   const taxPayerNo =
     options.taxPayerNo ??
@@ -382,24 +366,6 @@ async function chooseLeqiRunner(client: KubeSphereClient, options: LeqiOptions):
     target,
     pod,
     container: await chooseContainer(pod.containers, options.container)
-  };
-}
-
-async function resolveLeqiDbOptions(options: LeqiOptions): Promise<LeqiDbOptions> {
-  const password =
-    options.dbPassword ??
-    process.env.WORKCTL_LEQI_DB_PASSWORD ??
-    (await promptPassword({
-      message: "乐企接口库密码",
-      mask: "*"
-    }));
-
-  return {
-    host: options.dbHost ?? process.env.WORKCTL_LEQI_DB_HOST ?? DEFAULT_LEQI_DB_HOST,
-    port: options.dbPort ?? Number(process.env.WORKCTL_LEQI_DB_PORT ?? DEFAULT_LEQI_DB_PORT),
-    user: options.dbUser ?? process.env.WORKCTL_LEQI_DB_USER ?? DEFAULT_LEQI_DB_USER,
-    password,
-    database: options.dbName ?? process.env.WORKCTL_LEQI_DB_NAME ?? DEFAULT_LEQI_DB_NAME
   };
 }
 
