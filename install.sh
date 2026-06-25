@@ -25,8 +25,13 @@ require_command() {
 
 require_command curl
 require_command tar
-require_command cargo
-require_command rustc
+require_command node
+require_command npm
+
+NODE_MAJOR="$(node -p "Number(process.versions.node.split('.')[0])")"
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  fail "需要 Node.js >= 20，当前版本是 $(node --version)"
+fi
 
 PARENT_DIR="$(dirname "$INSTALL_DIR")"
 mkdir -p "$PARENT_DIR" "$BIN_DIR"
@@ -50,15 +55,16 @@ info "Downloading ${OWNER}/${REPO}@${REF}"
 curl -fsSL "$TARBALL_URL" -o "$TMP_DIR/workctl.tar.gz"
 tar -xzf "$TMP_DIR/workctl.tar.gz" --strip-components=1 -C "$NEW_DIR"
 
-[ -f "$NEW_DIR/Cargo.toml" ] || fail "安装包缺少 Cargo.toml"
+[ -f "$NEW_DIR/dist/cli.js" ] || fail "安装包缺少 dist/cli.js，请确认仓库已构建"
+[ -f "$NEW_DIR/package-lock.json" ] || fail "安装包缺少 package-lock.json"
 
-info "Building release binary with cargo"
+info "Installing production dependencies"
 (
   cd "$NEW_DIR"
-  cargo build --release --locked
+  npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 )
 
-[ -x "$NEW_DIR/target/release/workctl" ] || fail "构建产物缺少 target/release/workctl"
+chmod +x "$NEW_DIR/dist/cli.js"
 
 if [ -e "$INSTALL_DIR" ]; then
   BACKUP_DIR="${INSTALL_DIR}.previous.$$"
@@ -70,7 +76,10 @@ NEW_DIR=""
 rm -rf "$BACKUP_DIR"
 BACKUP_DIR=""
 
-cp "$INSTALL_DIR/target/release/workctl" "$BIN_DIR/workctl"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'exec node %q "$@"\n' "$INSTALL_DIR/dist/cli.js"
+} > "$BIN_DIR/workctl"
 chmod +x "$BIN_DIR/workctl"
 
 rm -rf "$OLD_INSTALL_DIR" "$OLD_BIN"
