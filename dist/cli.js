@@ -5,7 +5,7 @@ import path from "node:path";
 import { confirm, input, number, password as promptPassword, select } from "@inquirer/prompts";
 import { Command, Option } from "commander";
 import { KubeSphereClient } from "./kubesphere-client.js";
-import { buildOutputPath, chooseLeqiAction, chooseLeqiApi, chooseContainer, chooseDateSelection, chooseHistoryFiles, chooseLexiangInterface, chooseLexiangProfile, chooseLogRange, chooseLogSource, chooseNamespace, choosePod, chooseRedisAction, chooseRedisTargetCandidate, chooseSavedProfile, chooseTarget, chooseBosscliFeature, promptLexiangBusinessPayload, promptLexiangProfile, promptLeqiReqDto, promptConnection, promptNewProfileName, promptRedisOperation } from "./prompts.js";
+import { buildOutputPath, chooseLeqiAction, chooseLeqiApi, chooseContainer, chooseDateSelection, chooseHistoryFiles, chooseLexiangInterface, chooseLexiangNextAction, chooseLexiangProfile, chooseLogRange, chooseLogSource, chooseNamespace, choosePod, chooseRedisAction, chooseRedisTargetCandidate, chooseSavedProfile, chooseTarget, chooseBosscliFeature, promptLexiangBusinessPayload, promptLexiangProfile, promptLeqiReqDto, promptConnection, promptNewProfileName, promptRedisOperation } from "./prompts.js";
 import { getProfile, readProfiles, removeProfile, setDefaultProfile, setProfileRedisConfig, setProfileRedisPassword, upsertProfile } from "./profile-store.js";
 import { readLexiangProfiles, upsertLexiangProfile } from "./lexiang-profile-store.js";
 import { exportHistoryLogs, filterHistoryFilesByService, listHistoryFiles, statHistoryFiles } from "./history-logs.js";
@@ -33,18 +33,23 @@ program.action(async (options) => {
         await runDownloadFlow(options);
         return;
     }
+    let defaultFeature;
     while (true) {
-        const feature = await chooseBosscliFeature();
+        const feature = await chooseBosscliFeature(defaultFeature);
         if (feature === "exit") {
             return;
         }
+        defaultFeature = feature;
         if (feature === "leqi") {
             await runLeqiFlow(options);
             console.log("");
             continue;
         }
         if (feature === "lexiang") {
-            await runLexiangFlow();
+            const result = await runLexiangFlow();
+            if (result === "exit") {
+                return;
+            }
             console.log("");
             continue;
         }
@@ -299,7 +304,23 @@ async function runLeqiFlow(options) {
     console.log(result.stdout.trim() || "(无响应内容)");
 }
 async function runLexiangFlow() {
-    const profile = await resolveLexiangProfile();
+    let profile = await resolveLexiangProfile();
+    while (true) {
+        await runSingleLexiangCurl(profile);
+        const nextAction = await chooseLexiangNextAction();
+        if (nextAction === "continue") {
+            console.log("");
+            continue;
+        }
+        if (nextAction === "switch-profile") {
+            profile = await resolveLexiangProfile();
+            console.log("");
+            continue;
+        }
+        return nextAction;
+    }
+}
+async function runSingleLexiangCurl(profile) {
     const api = await chooseLexiangInterface(listLexiangInterfaces());
     const defaultPayload = buildLexiangBusinessPayloadDefault(api, profile.taxPayerNo);
     console.log(`\n${formatLexiangTemplateSummary(api)}\n`);

@@ -78,9 +78,10 @@ export async function promptNewProfileName(existingNames) {
 export function preferredNamespace(namespaces, preferred = DEFAULT_NAMESPACE) {
     return namespaces.includes(preferred) ? preferred : namespaces[0];
 }
-export async function chooseBosscliFeature() {
+export async function chooseBosscliFeature(defaultFeature) {
     return select({
         message: "选择功能",
+        default: defaultFeature,
         choices: [
             { name: "k8s", value: "logs" },
             { name: "乐企 curl", value: "leqi" },
@@ -181,6 +182,17 @@ export async function chooseLexiangInterface(apis) {
     });
 }
 export async function promptLexiangBusinessPayload(options) {
+    const action = await select({
+        message: "业务参数 JSON",
+        default: "default",
+        choices: [
+            { name: "使用默认参数生成 curl", value: "default" },
+            { name: "编辑业务参数 JSON", value: "edit" }
+        ]
+    });
+    if (action === "default") {
+        return options.defaultPayload;
+    }
     const value = await editor({
         message: "业务参数 JSON",
         default: JSON.stringify(options.defaultPayload, null, 2),
@@ -196,6 +208,18 @@ export async function promptLexiangBusinessPayload(options) {
         }
     });
     return parseLexiangBusinessPayloadJson(value);
+}
+export async function chooseLexiangNextAction() {
+    return select({
+        message: "乐享下一步",
+        default: "continue",
+        choices: [
+            { name: "继续生成乐享 curl", value: "continue" },
+            { name: "切换乐享环境", value: "switch-profile" },
+            { name: "返回首页", value: "home" },
+            { name: "退出", value: "exit" }
+        ]
+    });
 }
 export async function chooseNamespace(namespaces, provided) {
     if (provided) {

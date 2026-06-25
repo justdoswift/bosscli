@@ -9,6 +9,7 @@ export interface ConnectionAnswers {
 }
 export type BosscliFeature = "logs" | "leqi" | "lexiang" | "leqi-sm4" | "get-hash-code" | "redis" | "middle-db-mock" | "exit";
 export type RedisActionChoice = RedisAction | "switch-db" | "back";
+export type LexiangNextAction = "continue" | "switch-profile" | "home" | "exit";
 export type ProfileChoice = {
     kind: "saved";
     profile: SavedProfile;
@@ -25,7 +26,7 @@ export declare function chooseSavedProfile(profiles: SavedProfile[], defaultProf
 export declare function promptConnection(defaults: Partial<ConnectionAnswers>): Promise<ConnectionAnswers>;
 export declare function promptNewProfileName(existingNames: string[]): Promise<string>;
 export declare function preferredNamespace(namespaces: string[], preferred?: string): string | undefined;
-export declare function chooseBosscliFeature(): Promise<BosscliFeature>;
+export declare function chooseBosscliFeature(defaultFeature?: BosscliFeature): Promise<BosscliFeature>;
 export declare function chooseLexiangProfile(profiles: LexiangProfile[], defaultProfile?: string): Promise<LexiangProfileChoice>;
 export declare function promptLexiangProfile(options: {
     existingNames: string[];
@@ -41,6 +42,7 @@ export declare function chooseLexiangInterface(apis: LexiangInterfaceInfo[]): Pr
 export declare function promptLexiangBusinessPayload(options: {
     defaultPayload: LexiangBusinessPayload;
 }): Promise<LexiangBusinessPayload>;
+export declare function chooseLexiangNextAction(): Promise<LexiangNextAction>;
 export declare function chooseNamespace(namespaces: string[], provided?: string): Promise<string>;
 export declare function chooseTarget(targets: KubeTarget[], provided?: string): Promise<KubeTarget>;
 export declare function chooseRedisTargetCandidate(targets: KubeTarget[]): Promise<KubeTarget>;

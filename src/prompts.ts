@@ -48,6 +48,7 @@ export type BosscliFeature =
   | "middle-db-mock"
   | "exit";
 export type RedisActionChoice = RedisAction | "switch-db" | "back";
+export type LexiangNextAction = "continue" | "switch-profile" | "home" | "exit";
 
 export type ProfileChoice =
   | {
@@ -157,9 +158,10 @@ export function preferredNamespace(namespaces: string[], preferred = DEFAULT_NAM
   return namespaces.includes(preferred) ? preferred : namespaces[0];
 }
 
-export async function chooseBosscliFeature(): Promise<BosscliFeature> {
+export async function chooseBosscliFeature(defaultFeature?: BosscliFeature): Promise<BosscliFeature> {
   return select({
     message: "选择功能",
+    default: defaultFeature,
     choices: [
       { name: "k8s", value: "logs" },
       { name: "乐企 curl", value: "leqi" },
@@ -285,6 +287,19 @@ export async function chooseLexiangInterface(apis: LexiangInterfaceInfo[]): Prom
 export async function promptLexiangBusinessPayload(options: {
   defaultPayload: LexiangBusinessPayload;
 }): Promise<LexiangBusinessPayload> {
+  const action = await select({
+    message: "业务参数 JSON",
+    default: "default",
+    choices: [
+      { name: "使用默认参数生成 curl", value: "default" },
+      { name: "编辑业务参数 JSON", value: "edit" }
+    ]
+  });
+
+  if (action === "default") {
+    return options.defaultPayload;
+  }
+
   const value = await editor({
     message: "业务参数 JSON",
     default: JSON.stringify(options.defaultPayload, null, 2),
@@ -300,6 +315,19 @@ export async function promptLexiangBusinessPayload(options: {
   });
 
   return parseLexiangBusinessPayloadJson(value);
+}
+
+export async function chooseLexiangNextAction(): Promise<LexiangNextAction> {
+  return select({
+    message: "乐享下一步",
+    default: "continue",
+    choices: [
+      { name: "继续生成乐享 curl", value: "continue" },
+      { name: "切换乐享环境", value: "switch-profile" },
+      { name: "返回首页", value: "home" },
+      { name: "退出", value: "exit" }
+    ]
+  });
 }
 
 export async function chooseNamespace(namespaces: string[], provided?: string): Promise<string> {

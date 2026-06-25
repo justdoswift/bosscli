@@ -15,6 +15,7 @@ import {
   chooseDateSelection,
   chooseHistoryFiles,
   chooseLexiangInterface,
+  chooseLexiangNextAction,
   chooseLexiangProfile,
   chooseLogRange,
   chooseLogSource,
@@ -32,7 +33,7 @@ import {
   promptNewProfileName,
   promptRedisOperation
 } from "./prompts.js";
-import type { ConnectionAnswers } from "./prompts.js";
+import type { BosscliFeature, ConnectionAnswers } from "./prompts.js";
 import {
   getProfile,
   readProfiles,
@@ -186,11 +187,13 @@ program.action(async (options: DownloadOptions) => {
     return;
   }
 
+  let defaultFeature: BosscliFeature | undefined;
   while (true) {
-    const feature = await chooseBosscliFeature();
+    const feature = await chooseBosscliFeature(defaultFeature);
     if (feature === "exit") {
       return;
     }
+    defaultFeature = feature;
 
     if (feature === "leqi") {
       await runLeqiFlow(options);
@@ -199,7 +202,10 @@ program.action(async (options: DownloadOptions) => {
     }
 
     if (feature === "lexiang") {
-      await runLexiangFlow();
+      const result = await runLexiangFlow();
+      if (result === "exit") {
+        return;
+      }
       console.log("");
       continue;
     }
@@ -487,8 +493,29 @@ async function runLeqiFlow(options: LeqiOptions): Promise<void> {
   console.log(result.stdout.trim() || "(无响应内容)");
 }
 
-async function runLexiangFlow(): Promise<void> {
-  const profile = await resolveLexiangProfile();
+type LexiangFlowResult = "home" | "exit";
+
+async function runLexiangFlow(): Promise<LexiangFlowResult> {
+  let profile = await resolveLexiangProfile();
+
+  while (true) {
+    await runSingleLexiangCurl(profile);
+
+    const nextAction = await chooseLexiangNextAction();
+    if (nextAction === "continue") {
+      console.log("");
+      continue;
+    }
+    if (nextAction === "switch-profile") {
+      profile = await resolveLexiangProfile();
+      console.log("");
+      continue;
+    }
+    return nextAction;
+  }
+}
+
+async function runSingleLexiangCurl(profile: LexiangProfile): Promise<void> {
   const api = await chooseLexiangInterface(listLexiangInterfaces());
   const defaultPayload = buildLexiangBusinessPayloadDefault(api, profile.taxPayerNo);
 
