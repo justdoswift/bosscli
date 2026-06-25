@@ -20,6 +20,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
+    "generate:leqi-templates": "python3 scripts/generate-leqi-reqdto-templates.py",
     "workctl": "node dist/cli.js",
     "test": "vitest run",
     "start": "node dist/cli.js"

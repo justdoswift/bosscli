@@ -163,7 +163,7 @@ workctl leqi
 
 接口列表使用内置快照，来源是 `lxzsdb.tax_leqi_api_info` 中当前启用的 131 条接口。运行时不会连接 MySQL，也不会询问接口库密码；如果接口表有变化，更新快照并发布新版本即可。
 
-选择接口后会填写 `taxPayerNo/testMode/reqDTO`，默认操作是导出可复制 curl。也可以直达：
+选择接口后会填写 `taxPayerNo/testMode/reqDTO`，默认操作是导出可复制 curl。`reqDTO` 会优先使用随包内置的乐企能力文档模板，并显示文档文件、章节和字段统计；没有模板时才回退为 `{}`。导出的 curl 会使用格式化 JSON，并自动复制到系统剪切板。也可以直达：
 
 ```bash
 workctl leqi \
@@ -171,6 +171,12 @@ workctl leqi \
   --tax-payer-no 91150100397352740W \
   --req-dto '{"ptbh":"1fc4107f168694d1efb5","nsrsbh":"91150100397352740W","sqlx":"1","sqed":20000000}' \
   --action curl
+```
+
+在源码仓库内重新抽取本机 Word 文档里的 `reqDTO` 模板：
+
+```bash
+npm run generate:leqi-templates
 ```
 
 如果选择直接调用，工具会登录 KubeSphere，并默认进入 `tax-digital` 下的 `tax-api-proxy-server` Pod 执行集群内 curl。可用参数覆盖：
@@ -184,6 +190,33 @@ workctl leqi \
   --profile 仿真环境 \
   --namespace tax-digital \
   --runner-workload tax-api-proxy-server
+```
+
+## Redis 工具
+
+进入 Redis 工具：
+
+```bash
+workctl redis
+```
+
+Redis 工具会登录 KubeSphere，自动查找可见 namespace 中的 Redis 工作负载，优先进入 `kubesphere-system / redis`，然后在 Redis Pod 内直接执行 `redis-cli`。这和你在 KubeSphere 终端里输入 `redis-cli` 是同一个思路：默认不再询问 host、port、db、password。
+
+如果你确实要从其它 Pod 访问 Redis，也可以手动指定工作负载，并用 `--redis-host/--redis-port/--redis-db/--redis-password` 覆盖连接参数。
+
+第一版不会创建临时工具 Pod；如果 Redis 容器没有 `redis-cli`，会提示你切换到带工具的 Pod/容器。
+
+支持的操作包括 `PING`、`INFO`、`GET key`、`SCAN pattern` 和自定义命令。自定义命令如果包含常见写操作（如 `DEL`、`SET`、`HSET`、`EXPIRE`、`FLUSHDB`）会要求二次确认。Redis 密码只在本次进程内使用，不会写入配置文件。
+
+也可以直达：
+
+```bash
+workctl redis \
+  --profile 测试环境 \
+  --namespace kubesphere-system \
+  --workload redis \
+  --redis-action get \
+  --key tax:invoice:demo
 ```
 
 保存环境配置：

@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { checkbox, confirm, input, number, password, select } from "@inquirer/prompts";
 import { addDays, assertDateString, buildDateRange, buildDateSelection, formatLocalDate } from "./date-utils.js";
+import { formatRedisTargetChoice } from "./redis.js";
 import { formatLeqiApiChoice, parseReqDtoJson } from "./leqi.js";
 import { buildLogFileName, defaultOutputDir, formatBytes, normalizeBaseUrl } from "./utils.js";
 const NEW_PROFILE_VALUE = "__new__";
@@ -81,7 +82,8 @@ export async function chooseWorkctlFeature() {
         message: "选择功能",
         choices: [
             { name: "K8s 日志", value: "logs" },
-            { name: "乐企接口", value: "leqi" }
+            { name: "乐企接口", value: "leqi" },
+            { name: "Redis 工具", value: "redis" }
         ]
     });
 }
@@ -112,6 +114,16 @@ export async function chooseTarget(targets, provided) {
         pageSize: 15,
         choices: targets.map((target) => ({
             name: formatTargetChoice(target),
+            value: target
+        }))
+    });
+}
+export async function chooseRedisTargetCandidate(targets) {
+    return select({
+        message: "选择 Redis 工作负载",
+        pageSize: 12,
+        choices: targets.map((target) => ({
+            name: formatRedisTargetChoice(target),
             value: target
         }))
     });
@@ -245,31 +257,105 @@ export async function chooseLeqiAction(provided) {
     return select({
         message: "选择操作",
         choices: [
-            { name: "导出 curl", value: "curl" },
-            { name: "直接调用", value: "call" }
+            { name: "导出 curl（使用文档模板）", value: "curl" },
+            { name: "直接调用（使用文档模板）", value: "call" }
         ],
         default: "curl"
     });
 }
-export async function promptLeqiReqDto(provided) {
-    if (provided) {
-        return parseReqDtoJson(provided);
+export async function promptLeqiReqDto(options = {}) {
+    if (options.provided) {
+        return parseReqDtoJson(options.provided);
     }
-    const value = await input({
-        message: "reqDTO JSON",
-        default: "{}",
-        required: true,
-        validate: (candidate) => {
-            try {
-                parseReqDtoJson(candidate);
-                return true;
-            }
-            catch (error) {
-                return error.message;
-            }
-        }
+    if (options.defaultReqDto) {
+        return options.defaultReqDto;
+    }
+    return {};
+}
+export async function promptRedisConnection(options) {
+    const host = options.host ??
+        (await input({
+            message: "Redis host",
+            default: options.defaultHost,
+            required: true
+        }));
+    const port = options.port ??
+        (await number({
+            message: "Redis port",
+            default: 6379,
+            min: 1,
+            required: true
+        }));
+    const db = options.db ??
+        (await number({
+            message: "Redis db",
+            default: 0,
+            min: 0,
+            required: true
+        }));
+    const redisPassword = options.password ??
+        (await password({
+            message: "Redis 密码（可空）",
+            mask: "*"
+        }));
+    return {
+        host: host.trim(),
+        port,
+        db,
+        password: redisPassword || undefined
+    };
+}
+export async function chooseRedisAction(provided) {
+    if (provided) {
+        return provided;
+    }
+    return select({
+        message: "选择 Redis 操作",
+        choices: [
+            { name: "PING", value: "ping" },
+            { name: "INFO", value: "info" },
+            { name: "GET key", value: "get" },
+            { name: "SCAN pattern", value: "scan" },
+            { name: "执行自定义命令", value: "custom" }
+        ],
+        default: "ping"
     });
-    return parseReqDtoJson(value);
+}
+export async function promptRedisOperation(options) {
+    switch (options.action) {
+        case "ping":
+            return { action: "ping" };
+        case "info":
+            return { action: "info" };
+        case "get":
+            return {
+                action: "get",
+                key: options.key ??
+                    (await input({
+                        message: "Redis key",
+                        required: true
+                    }))
+            };
+        case "scan":
+            return {
+                action: "scan",
+                pattern: options.pattern ??
+                    (await input({
+                        message: "Redis key pattern",
+                        default: "*",
+                        required: true
+                    }))
+            };
+        case "custom":
+            return {
+                action: "custom",
+                command: options.command ??
+                    (await input({
+                        message: "Redis 自定义命令",
+                        required: true
+                    }))
+            };
+    }
 }
 export async function chooseDateSelection(options) {
     if (options.date || options.from || options.to || options.recentDays) {

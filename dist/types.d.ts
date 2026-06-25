@@ -90,10 +90,34 @@ export interface LeqiApiInfo {
     abilityCode?: string;
     sceneCode?: string;
 }
+export type JsonValue = null | string | number | boolean | JsonValue[] | {
+    [key: string]: JsonValue;
+};
+export type LeqiReqDto = {
+    [key: string]: JsonValue;
+} | JsonValue[];
+export interface LeqiReqDtoField {
+    key: string;
+    name: string;
+    type: string;
+    length: string;
+    required: string;
+    description: string;
+}
+export interface LeqiReqDtoTemplate {
+    apiIdentity: string;
+    apiName: string;
+    abilityCode?: string;
+    serverCode?: string;
+    sourceDoc: string;
+    sectionTitle: string;
+    fields: LeqiReqDtoField[];
+    template: LeqiReqDto;
+}
 export interface LeqiInvokePayload {
     apiIdentity: string;
     taxPayerNo: string;
     testMode: number;
-    reqDTO: Record<string, unknown>;
+    reqDTO: LeqiReqDto;
 }
 export type LeqiAction = "curl" | "call";

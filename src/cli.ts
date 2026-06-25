@@ -17,12 +17,15 @@ import {
   chooseLogSource,
   chooseNamespace,
   choosePod,
+  chooseRedisAction,
+  chooseRedisTargetCandidate,
   chooseSavedProfile,
   chooseTarget,
   chooseWorkctlFeature,
   promptLeqiReqDto,
   promptConnection,
-  promptNewProfileName
+  promptNewProfileName,
+  promptRedisOperation
 } from "./prompts.js";
 import type { ConnectionAnswers } from "./prompts.js";
 import {
@@ -46,15 +49,34 @@ import {
   normalizeBaseUrl
 } from "./utils.js";
 import { ProgressBar } from "./progress.js";
+import { copyToClipboard } from "./clipboard.js";
 import {
   buildLeqiCurl,
   buildLeqiExecCurlCommand,
   buildLeqiInvokePayload,
+  buildLeqiReqDtoDefault,
   DEFAULT_LEQI_ENDPOINT,
   DEFAULT_LEQI_RUNNER_WORKLOAD,
   DEFAULT_LEQI_TAX_PAYER_NO,
+  findLeqiReqDtoTemplate,
+  formatLeqiReqDtoTemplateSummary,
+  formatLeqiReqDtoTemplateSource,
   listLeqiApis
 } from "./leqi.js";
+import {
+  REDIS_CLI_MISSING_MARKER,
+  buildRedisCliCommand,
+  describeRedisConnection,
+  describeRedisOperation,
+  autoRedisTarget,
+  formatRedisTargetChoice,
+  isDangerousRedisCommand,
+  isRedisTarget,
+  redactRedisPassword,
+  redisServiceHost,
+  sortRedisTargets,
+  type RedisAction
+} from "./redis.js";
 
 interface ConnectionOptions {
   profile?: string;
@@ -64,12 +86,15 @@ interface ConnectionOptions {
   insecure?: boolean;
 }
 
-interface DownloadOptions extends ConnectionOptions {
+interface KubeTargetOptions {
   namespace?: string;
   workload?: string;
   service?: string;
   pod?: string;
   container?: string;
+}
+
+interface DownloadOptions extends ConnectionOptions, KubeTargetOptions {
   tailLines?: number;
   sinceMinutes?: number;
   all?: boolean;
@@ -96,6 +121,17 @@ interface LeqiOptions extends ConnectionOptions {
   container?: string;
 }
 
+interface RedisOptions extends ConnectionOptions, KubeTargetOptions {
+  redisHost?: string;
+  redisPort?: number;
+  redisDb?: number;
+  redisPassword?: string;
+  redisAction?: RedisAction;
+  key?: string;
+  pattern?: string;
+  redisCommand?: string;
+}
+
 const program = new Command();
 
 program
@@ -115,6 +151,11 @@ program.action(async (options: DownloadOptions) => {
   const feature = await chooseWorkctlFeature();
   if (feature === "leqi") {
     await runLeqiFlow(options);
+    return;
+  }
+
+  if (feature === "redis") {
+    await runRedisFlow(options);
     return;
   }
 
@@ -159,6 +200,13 @@ addConnectionOptions(leqi);
 addLeqiOptions(leqi);
 leqi.action(async (options: LeqiOptions, command: Command) => {
   await runLeqiFlow(mergeCommandOptions<LeqiOptions>(options, command));
+});
+
+const redis = program.command("redis").description("Redis 集群内访问工具");
+addConnectionOptions(redis);
+addRedisOptions(redis);
+redis.action(async (options: RedisOptions, command: Command) => {
+  await runRedisFlow(mergeCommandOptions<RedisOptions>(options, command));
 });
 
 const profile = program.command("profile").description("管理已保存的 KubeSphere 环境");
@@ -244,6 +292,23 @@ function addLeqiOptions(command: Command): void {
     .option("-c, --container <container>", "执行 curl 的容器名称");
 }
 
+function addRedisOptions(command: Command): void {
+  command
+    .option("-n, --namespace <namespace>", "执行 redis-cli 的 namespace")
+    .option("-w, --workload <workload>", "执行 redis-cli 的工作负载")
+    .option("-s, --service <service>", "工作负载名称（兼容旧参数）")
+    .option("--pod <pod>", "执行 redis-cli 的 Pod 名称")
+    .option("-c, --container <container>", "执行 redis-cli 的容器名称")
+    .option("--redis-host <host>", "Redis host")
+    .option("--redis-port <number>", "Redis port", parsePositiveInteger)
+    .option("--redis-db <number>", "Redis db", parseNonNegativeInteger)
+    .option("--redis-password <password>", "Redis 密码（只在本次命令中使用）")
+    .addOption(new Option("--redis-action <action>", "Redis 操作").choices(["ping", "info", "get", "scan", "custom"]))
+    .option("--key <key>", "GET 使用的 key")
+    .option("--pattern <pattern>", "SCAN 使用的 key pattern")
+    .option("--redis-command <command>", "自定义 Redis 命令，例如 TTL my:key");
+}
+
 function mergeCommandOptions<T extends object>(options: T, command: Command): T {
   return {
     ...(command.parent?.opts<Record<string, unknown>>() ?? {}),
@@ -285,7 +350,17 @@ async function runLeqiFlow(options: LeqiOptions): Promise<void> {
       min: 0,
       required: true
     }));
-  const reqDTO = await promptLeqiReqDto(options.reqDto);
+  const template = findLeqiReqDtoTemplate(api);
+  const defaultReqDto = buildLeqiReqDtoDefault(api, taxPayerNo);
+  if (template && !options.reqDto) {
+    console.log(`\n${formatLeqiReqDtoTemplateSummary(template)}\n`);
+  } else if (!template && !options.reqDto) {
+    console.log("\n暂无文档模板，reqDTO 使用空对象作为默认值。\n");
+  }
+  const reqDTO = await promptLeqiReqDto({
+    provided: options.reqDto,
+    defaultReqDto
+  });
   const payload = buildLeqiInvokePayload({
     api,
     taxPayerNo,
@@ -301,6 +376,15 @@ async function runLeqiFlow(options: LeqiOptions): Promise<void> {
   if (action === "curl") {
     console.log("\n可复制 curl：");
     console.log(curlText);
+    const clipboardResult = await copyToClipboard(curlText);
+    if (clipboardResult.copied) {
+      console.log(`\n已复制到剪切板${clipboardResult.command ? `：${clipboardResult.command}` : ""}`);
+    } else {
+      console.log(`\n剪切板复制失败，请手动复制。${clipboardResult.error ? `原因：${clipboardResult.error}` : ""}`);
+    }
+    if (template) {
+      console.log(`\n文档来源：${formatLeqiReqDtoTemplateSource(template)}`);
+    }
     return;
   }
 
@@ -327,6 +411,148 @@ async function runLeqiFlow(options: LeqiOptions): Promise<void> {
   }
 
   console.log(result.stdout.trim() || "(无响应内容)");
+}
+
+async function runRedisFlow(options: RedisOptions): Promise<void> {
+  const { client, connection } = await loginFromOptions(options);
+  console.log(`已登录：${connection.username} @ ${connection.baseUrl}`);
+
+  const { namespace, target, pod, container, autoDiscovered } = await chooseRedisKubeTarget(client, options);
+  if (autoDiscovered) {
+    console.log(`已自动选择 Redis 工作负载：${formatRedisTargetChoice(target)}`);
+  }
+  const redisConnection = {
+    host: options.redisHost,
+    port: options.redisPort,
+    db: options.redisDb,
+    password: options.redisPassword
+  };
+  const action = await chooseRedisAction(options.redisAction);
+  const operation = await promptRedisOperation({
+    action,
+    key: options.key,
+    pattern: options.pattern,
+    command: options.redisCommand
+  });
+
+  if (operation.action === "custom" && isDangerousRedisCommand(operation.command)) {
+    const confirmed = await confirm({
+      message: `检测到可能修改 Redis 数据的命令：${operation.command}，确认执行吗？`,
+      default: false
+    });
+    if (!confirmed) {
+      console.log("已取消 Redis 命令");
+      return;
+    }
+  }
+
+  console.log(`执行位置：${namespace} / ${target.name} / ${pod.name} / ${container}`);
+  console.log(`Redis：${describeRedisConnection(redisConnection)}`);
+  console.log(`命令：${describeRedisOperation(operation)}`);
+
+  const result = await client.execCommand({
+    namespace,
+    pod: pod.name,
+    container,
+    command: buildRedisCliCommand(redisConnection, operation),
+    timeoutMs: 120000
+  });
+
+  const stdout = redactRedisPassword(result.stdout, redisConnection.password);
+  const stderr = redactRedisPassword(result.stderr, redisConnection.password);
+  const error = redactRedisPassword(result.error, redisConnection.password);
+
+  if (stderr.includes(REDIS_CLI_MISSING_MARKER)) {
+    const detail = stderr.replace(REDIS_CLI_MISSING_MARKER, "").trim();
+    const targetLabel = isRedisTarget(target) ? "当前 Redis 容器" : `容器 ${container}`;
+    throw new Error(
+      [
+        `${targetLabel} 中没有 redis-cli；请切换到带 redis-cli 的 Pod/容器后重试。`,
+        buildRedisConnectionHint(stderr, namespace),
+        detail ? `连通性检查输出：${detail}` : undefined
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  if (error.trim()) {
+    throw new Error(`Redis 命令执行失败：${error.trim()}`);
+  }
+
+  if (stderr.trim()) {
+    console.error(stderr.trim());
+  }
+
+  console.log(stdout.trim() || "(无响应内容)");
+}
+
+async function chooseRedisKubeTarget(
+  client: KubeSphereClient,
+  options: RedisOptions
+): Promise<{
+  namespace: string;
+  target: KubeTarget;
+  pod: PodSummary;
+  container: string;
+  autoDiscovered: boolean;
+}> {
+  if (hasExplicitRedisTargetHint(options)) {
+    const selected = await chooseKubeTarget(client, options);
+    return { ...selected, autoDiscovered: false };
+  }
+
+  const redisTargets = await discoverRedisTargets(client, options.namespace);
+  if (redisTargets.length === 0) {
+    const selected = await chooseKubeTarget(client, options);
+    return { ...selected, autoDiscovered: false };
+  }
+
+  const target = autoRedisTarget(redisTargets) ?? (await chooseRedisTargetCandidate(redisTargets));
+  const pods = await client.listPodsForTarget(target);
+  if (pods.length === 0) {
+    throw new Error(buildNoPodsMessage(target));
+  }
+
+  const pod = await choosePod(pods, options.pod);
+  if (pod.containers.length === 0) {
+    throw new Error(`Pod ${pod.name} 中没有可选容器`);
+  }
+
+  return {
+    namespace: target.namespace,
+    target,
+    pod,
+    container: await chooseContainer(pod.containers, options.container),
+    autoDiscovered: true
+  };
+}
+
+async function discoverRedisTargets(client: KubeSphereClient, namespace?: string): Promise<KubeTarget[]> {
+  const namespaces = namespace ? [namespace] : await client.listNamespaces();
+  const targets: KubeTarget[] = [];
+
+  for (const item of namespaces) {
+    try {
+      targets.push(...(await client.listTargets(item)).filter(isRedisTarget));
+    } catch {
+      // Some visible namespaces may still reject workload listing; skip them and keep scanning.
+    }
+  }
+
+  return sortRedisTargets(targets);
+}
+
+function hasExplicitRedisTargetHint(options: RedisOptions): boolean {
+  return Boolean(options.workload ?? options.service ?? options.pod ?? options.container);
+}
+
+function buildRedisConnectionHint(stderr: string, namespace: string): string | undefined {
+  if (!/Could not resolve hostname|Name or service not known|Temporary failure in name resolution/i.test(stderr)) {
+    return undefined;
+  }
+
+  return `Redis Service DNS 可尝试：${redisServiceHost(namespace)}；如果已经进入 Redis Pod，自身连接请使用 127.0.0.1。`;
 }
 
 async function chooseLeqiRunner(client: KubeSphereClient, options: LeqiOptions): Promise<{
