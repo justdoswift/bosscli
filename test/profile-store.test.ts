@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   chooseDefaultProfile,
+  migrateLegacyProfilesIfNeeded,
   readProfiles,
   removeProfile,
   setDefaultProfile,
@@ -17,7 +18,7 @@ describe("profile store", () => {
   let filePath: string;
 
   beforeEach(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "kslog-profile-"));
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "workctl-profile-"));
     filePath = path.join(dir, "profiles.json");
   });
 
@@ -61,5 +62,62 @@ describe("profile store", () => {
     expect(await removeProfile("生产", filePath)).toBe(true);
     config = await readProfiles(filePath);
     expect(config.defaultProfile).toBe("开发");
+  });
+
+  it("migrates legacy profiles when the new file is missing", async () => {
+    const legacyFilePath = path.join(dir, "legacy", "profiles.json");
+    await fs.mkdir(path.dirname(legacyFilePath), { recursive: true });
+    await fs.writeFile(
+      legacyFilePath,
+      JSON.stringify({
+        defaultProfile: "测试环境",
+        profiles: [
+          {
+            name: "测试环境",
+            url: "http://192.168.7.191:30880",
+            username: "admin",
+            password: "secret",
+            insecure: false,
+            createdAt: "2026-06-24T00:00:00.000Z",
+            updatedAt: "2026-06-24T00:00:00.000Z"
+          }
+        ]
+      })
+    );
+
+    await expect(migrateLegacyProfilesIfNeeded(filePath, legacyFilePath)).resolves.toBe(true);
+
+    const config = await readProfiles(filePath);
+    const stat = await fs.stat(filePath);
+    const legacyContent = await fs.readFile(legacyFilePath, "utf8");
+
+    expect(config.defaultProfile).toBe("测试环境");
+    expect(config.profiles[0]?.username).toBe("admin");
+    expect(stat.mode & 0o777).toBe(0o600);
+    expect(legacyContent).toContain("测试环境");
+  });
+
+  it("does not overwrite an existing profile file during migration", async () => {
+    const legacyFilePath = path.join(dir, "legacy", "profiles.json");
+    await upsertProfile({ name: "新环境", url: "http://new", username: "new", password: "p" }, filePath);
+    await fs.mkdir(path.dirname(legacyFilePath), { recursive: true });
+    await fs.writeFile(
+      legacyFilePath,
+      JSON.stringify({
+        profiles: [{ name: "旧环境", url: "http://old", username: "old", password: "p" }]
+      })
+    );
+
+    await expect(migrateLegacyProfilesIfNeeded(filePath, legacyFilePath)).resolves.toBe(false);
+
+    const config = await readProfiles(filePath);
+    expect(config.profiles.map((profile) => profile.name)).toEqual(["新环境"]);
+  });
+
+  it("returns an empty config when there is no profile file to migrate", async () => {
+    const legacyFilePath = path.join(dir, "missing", "profiles.json");
+
+    await expect(migrateLegacyProfilesIfNeeded(filePath, legacyFilePath)).resolves.toBe(false);
+    await expect(readProfiles(filePath)).resolves.toEqual({ profiles: [] });
   });
 });

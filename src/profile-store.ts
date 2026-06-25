@@ -5,14 +5,56 @@ import path from "node:path";
 import type { ProfilesFile, SavedProfile } from "./types.js";
 import { normalizeBaseUrl } from "./utils.js";
 
-const CONFIG_DIR = ".kslog";
+const CONFIG_DIR = ".workctl";
+const LEGACY_CONFIG_DIR = ".kslog";
 const CONFIG_FILE = "profiles.json";
 
 export function defaultProfilesPath(homeDir = os.homedir()): string {
   return path.join(homeDir, CONFIG_DIR, CONFIG_FILE);
 }
 
+export function legacyProfilesPath(homeDir = os.homedir()): string {
+  return path.join(homeDir, LEGACY_CONFIG_DIR, CONFIG_FILE);
+}
+
+export async function migrateLegacyProfilesIfNeeded(
+  filePath = defaultProfilesPath(),
+  legacyFilePath = legacyProfilesPath()
+): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  let legacyContent: string;
+  try {
+    legacyContent = await fs.readFile(legacyFilePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+
+    throw error;
+  }
+
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  await fs.writeFile(filePath, legacyContent, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  await fs.chmod(filePath, 0o600);
+  return true;
+}
+
 export async function readProfiles(filePath = defaultProfilesPath()): Promise<ProfilesFile> {
+  if (filePath === defaultProfilesPath()) {
+    await migrateLegacyProfilesIfNeeded(filePath);
+  }
+
   try {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as ProfilesFile;

@@ -1,11 +1,11 @@
 {
-  "name": "kslog",
-  "version": "0.3.5",
-  "description": "KubeSphere log downloader CLI",
+  "name": "workctl",
+  "version": "0.4.0",
+  "description": "Daily work toolkit CLI",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/justdoswift/kslog.git"
+    "url": "https://github.com/justdoswift/workctl.git"
   },
   "license": "MIT",
   "files": [
@@ -14,12 +14,12 @@
     "install.sh"
   ],
   "bin": {
-    "kslog": "./dist/cli.js"
+    "workctl": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "kslog": "node dist/cli.js",
+    "workctl": "node dist/cli.js",
     "test": "vitest run",
     "start": "node dist/cli.js"
   },

@@ -1,56 +1,58 @@
-# kslog
+# workctl
 
-KubeSphere 日志下载命令行工具。它在本机终端登录 KubeSphere Console，加载 namespace、工作负载、Pod 和容器，然后下载 Kubernetes 当前保留的容器日志，或通过 exec 从 `/opt/saas-logs` 抽取历史日志。
+日常工作工具集 CLI。当前支持在本机终端登录 KubeSphere Console，加载 namespace、工作负载、Pod 和容器，然后下载 Kubernetes 当前保留的容器日志，或通过 exec 从 `/opt/saas-logs` 抽取历史日志。
 
 ## 一行安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justdoswift/kslog/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/justdoswift/workctl/main/install.sh | bash
 ```
 
 默认安装到：
 
 ```text
-~/.kslog/cli
-~/.kslog/bin/kslog
+~/.workctl/cli
+~/.workctl/bin/workctl
 ```
 
-如果安装后终端找不到 `kslog`，把下面这行加入 `~/.zshrc`：
+如果安装后终端找不到 `workctl`，把下面这行加入 `~/.zshrc`：
 
 ```bash
-export PATH="$HOME/.kslog/bin:$PATH"
+export PATH="$HOME/.workctl/bin:$PATH"
 ```
 
 验证安装：
 
 ```bash
-kslog --version
-kslog --help
+workctl --version
+workctl --help
 ```
 
 自定义安装目录：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justdoswift/kslog/main/install.sh | \
-  KSLOG_INSTALL_DIR="$HOME/.local/share/kslog" \
-  KSLOG_BIN_DIR="$HOME/.local/bin" \
-  KSLOG_REF="main" \
+curl -fsSL https://raw.githubusercontent.com/justdoswift/workctl/main/install.sh | \
+  WORKCTL_INSTALL_DIR="$HOME/.local/share/workctl" \
+  WORKCTL_BIN_DIR="$HOME/.local/bin" \
+  WORKCTL_REF="main" \
   bash
 ```
 
 升级：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justdoswift/kslog/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/justdoswift/workctl/main/install.sh | bash
 ```
 
 卸载程序文件：
 
 ```bash
-rm -rf ~/.kslog/cli ~/.kslog/bin/kslog
+rm -rf ~/.workctl/cli ~/.workctl/bin/workctl
 ```
 
-卸载不会删除 `~/.kslog/profiles.json`，避免误删已保存的环境账号。
+卸载不会删除 `~/.workctl/profiles.json`，避免误删已保存的环境账号。
+
+从旧版 `kslog` 升级时，安装脚本会删除旧程序文件 `~/.kslog/cli` 和 `~/.kslog/bin/kslog`，但不会删除 `~/.kslog/profiles.json`。首次读取配置时，如果 `~/.workctl/profiles.json` 不存在，会自动从旧 profile 复制迁移。
 
 ## 本地开发
 
@@ -75,13 +77,13 @@ node dist/cli.js
 
 ```bash
 npm link
-kslog --help
+workctl --help
 ```
 
 取消全局命令：
 
 ```bash
-npm unlink -g kslog
+npm unlink -g workctl
 ```
 
 ## 使用
@@ -89,7 +91,7 @@ npm unlink -g kslog
 完整交互流程：
 
 ```bash
-kslog
+workctl
 ```
 
 启动后会先选择已保存环境，或者选择“新增环境”。新增环境需要填写 `name/url/username/password`，登录成功后会自动保存并设为默认环境。
@@ -97,13 +99,13 @@ kslog
 验证登录：
 
 ```bash
-kslog login-check --url http://192.168.7.191:30880 --username admin
+workctl login-check --url http://192.168.7.191:30880 --username admin
 ```
 
 下载指定工作负载日志：
 
 ```bash
-kslog download \
+workctl download \
   --url http://192.168.7.191:30880 \
   --username admin \
   --namespace tax-digital \
@@ -115,7 +117,7 @@ kslog download \
 下载当前容器日志：
 
 ```bash
-kslog current \
+workctl current \
   --url http://192.168.7.191:30880 \
   --username admin \
   --namespace tax-digital \
@@ -126,7 +128,7 @@ kslog current \
 下载历史日志，按日志内容日期抽取匹配行：
 
 ```bash
-kslog history \
+workctl history \
   --url http://192.168.7.191:30880 \
   --username admin \
   --namespace tax-digital \
@@ -137,7 +139,7 @@ kslog history \
 如果已知远端历史日志文件，可以直接指定，避免进入多选：
 
 ```bash
-kslog history \
+workctl history \
   --url http://192.168.7.191:30880 \
   --username admin \
   --namespace tax-digital \
@@ -149,16 +151,16 @@ kslog history \
 保存环境配置：
 
 ```bash
-kslog profile add
-kslog profile list
-kslog profile use 测试环境
-kslog --profile 测试环境
+workctl profile add
+workctl profile list
+workctl profile use 测试环境
+workctl --profile 测试环境
 ```
 
 环境配置保存到：
 
 ```text
-~/.kslog/profiles.json
+~/.workctl/profiles.json
 ```
 
 按需求，`name/url/username/password` 会明文保存到这个 JSON 文件中，文件权限会设置为 `0600`。
@@ -168,7 +170,7 @@ kslog --profile 测试环境
 默认保存到：
 
 ```text
-~/Downloads/kubesphere-logs
+~/Downloads/workctl/kubesphere-logs
 ```
 
 不使用 `profile add` 时，密码、token、refreshToken 都只保存在当前进程内存里。

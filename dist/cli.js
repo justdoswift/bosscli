@@ -11,9 +11,9 @@ import { buildLogFileName, defaultOutputDir, formatBytes, normalizeBaseUrl } fro
 import { ProgressBar } from "./progress.js";
 const program = new Command();
 program
-    .name("kslog")
-    .description("KubeSphere 日志下载 CLI")
-    .version("0.3.5");
+    .name("workctl")
+    .description("日常工作工具集 CLI")
+    .version("0.4.0");
 addConnectionOptions(program);
 addDownloadOptions(program);
 program.action(async (options) => {
@@ -67,7 +67,7 @@ profile.command("add").description("新增或更新环境").action(async () => {
     const password = await promptPassword({ message: "密码", mask: "*" });
     const insecure = await confirm({ message: "是否允许 https 自签名证书", default: false });
     const setDefault = await confirm({ message: "设为默认环境", default: true });
-    console.warn("提示：密码会按你的选择明文保存到 ~/.kslog/profiles.json。");
+    console.warn("提示：密码会按你的选择明文保存到 ~/.workctl/profiles.json。");
     const saved = await upsertProfile({ name, url, username, password, insecure, setDefault });
     console.log(`已保存环境：${saved.name}`);
 });
@@ -86,10 +86,10 @@ program.parseAsync(process.argv).catch((error) => {
 });
 function addConnectionOptions(command) {
     command
-        .addOption(new Option("--profile <name>", "使用已保存的环境").env("KSLOG_PROFILE"))
-        .addOption(new Option("--url <url>", "KubeSphere 地址，例如 http://192.168.7.191:30880").env("KSLOG_URL"))
-        .addOption(new Option("-u, --username <username>", "用户名").env("KSLOG_USERNAME"))
-        .addOption(new Option("-p, --password <password>", "密码").env("KSLOG_PASSWORD"))
+        .addOption(new Option("--profile <name>", "使用已保存的环境").env("WORKCTL_PROFILE"))
+        .addOption(new Option("--url <url>", "KubeSphere 地址，例如 http://192.168.7.191:30880").env("WORKCTL_URL"))
+        .addOption(new Option("-u, --username <username>", "用户名").env("WORKCTL_USERNAME"))
+        .addOption(new Option("-p, --password <password>", "密码").env("WORKCTL_PASSWORD"))
         .option("--insecure", "允许 https 自签名证书");
 }
 function addDownloadOptions(command) {
@@ -240,7 +240,7 @@ async function runHistoryDownload(client, options, namespace, target, pod, conta
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     console.log("开始导出历史日志：");
     console.log(`  namespace: ${namespace}`);
-    console.log(`  service:   ${target.name}`);
+    console.log(`  workload: ${target.name}`);
     console.log(`  pod:       ${pod.name}`);
     console.log(`  container: ${container}`);
     console.log(`  path:      ${historyPath}`);
@@ -344,7 +344,7 @@ function parsePositiveInteger(value) {
     }
     return parsed;
 }
-function printCurrentDownloadSummary(namespace, service, pod, container, range, outputPath) {
+function printCurrentDownloadSummary(namespace, workload, pod, container, range, outputPath) {
     const rangeText = range.mode === "all"
         ? "全部当前日志"
         : range.mode === "tail"
@@ -352,7 +352,7 @@ function printCurrentDownloadSummary(namespace, service, pod, container, range, 
             : `最近 ${Math.round((range.sinceSeconds ?? 0) / 60)} 分钟`;
     console.log("开始下载当前日志：");
     console.log(`  namespace: ${namespace}`);
-    console.log(`  service:   ${service}`);
+    console.log(`  workload: ${workload}`);
     console.log(`  pod:       ${pod}`);
     console.log(`  container: ${container}`);
     console.log(`  range:     ${rangeText}`);

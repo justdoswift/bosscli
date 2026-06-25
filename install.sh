@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OWNER="${KSLOG_GITHUB_OWNER:-justdoswift}"
-REPO="${KSLOG_GITHUB_REPO:-kslog}"
-REF="${KSLOG_REF:-main}"
-INSTALL_DIR="${KSLOG_INSTALL_DIR:-"$HOME/.kslog/cli"}"
-BIN_DIR="${KSLOG_BIN_DIR:-"$HOME/.kslog/bin"}"
+OWNER="${WORKCTL_GITHUB_OWNER:-justdoswift}"
+REPO="${WORKCTL_GITHUB_REPO:-workctl}"
+REF="${WORKCTL_REF:-main}"
+INSTALL_DIR="${WORKCTL_INSTALL_DIR:-"$HOME/.workctl/cli"}"
+BIN_DIR="${WORKCTL_BIN_DIR:-"$HOME/.workctl/bin"}"
+OLD_INSTALL_DIR="$HOME/.kslog/cli"
+OLD_BIN="$HOME/.kslog/bin/kslog"
 TARBALL_URL="https://codeload.github.com/${OWNER}/${REPO}/tar.gz/${REF}"
 
 info() {
@@ -13,7 +15,7 @@ info() {
 }
 
 fail() {
-  printf 'kslog install error: %s\n' "$1" >&2
+  printf 'workctl install error: %s\n' "$1" >&2
   exit 1
 }
 
@@ -34,8 +36,8 @@ fi
 PARENT_DIR="$(dirname "$INSTALL_DIR")"
 mkdir -p "$PARENT_DIR" "$BIN_DIR"
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kslog-install.XXXXXX")"
-NEW_DIR="$(mktemp -d "${PARENT_DIR}/.kslog-cli.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/workctl-install.XXXXXX")"
+NEW_DIR="$(mktemp -d "${PARENT_DIR}/.workctl-cli.XXXXXX")"
 BACKUP_DIR=""
 
 cleanup() {
@@ -50,8 +52,8 @@ cleanup() {
 trap cleanup EXIT
 
 info "Downloading ${OWNER}/${REPO}@${REF}"
-curl -fsSL "$TARBALL_URL" -o "$TMP_DIR/kslog.tar.gz"
-tar -xzf "$TMP_DIR/kslog.tar.gz" --strip-components=1 -C "$NEW_DIR"
+curl -fsSL "$TARBALL_URL" -o "$TMP_DIR/workctl.tar.gz"
+tar -xzf "$TMP_DIR/workctl.tar.gz" --strip-components=1 -C "$NEW_DIR"
 
 [ -f "$NEW_DIR/dist/cli.js" ] || fail "安装包缺少 dist/cli.js，请确认仓库已构建"
 [ -f "$NEW_DIR/package-lock.json" ] || fail "安装包缺少 package-lock.json"
@@ -77,18 +79,21 @@ BACKUP_DIR=""
 {
   printf '#!/usr/bin/env bash\n'
   printf 'exec node %q "$@"\n' "$INSTALL_DIR/dist/cli.js"
-} > "$BIN_DIR/kslog"
-chmod +x "$BIN_DIR/kslog"
+} > "$BIN_DIR/workctl"
+chmod +x "$BIN_DIR/workctl"
 
-VERSION="$("$BIN_DIR/kslog" --version)"
-info "Installed kslog ${VERSION}"
-printf 'Binary: %s\n' "$BIN_DIR/kslog"
-printf 'Profiles remain in: %s\n' "$HOME/.kslog/profiles.json"
+rm -rf "$OLD_INSTALL_DIR" "$OLD_BIN"
+
+VERSION="$("$BIN_DIR/workctl" --version)"
+info "Installed workctl ${VERSION}"
+printf 'Binary: %s\n' "$BIN_DIR/workctl"
+printf 'Profiles: %s\n' "$HOME/.workctl/profiles.json"
+printf 'Legacy profiles, if present, remain in: %s\n' "$HOME/.kslog/profiles.json"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
-    printf '\nAdd kslog to PATH:\n'
+    printf '\nAdd workctl to PATH:\n'
     printf '  export PATH="%s:$PATH"\n' "$BIN_DIR"
     printf '\nFor zsh, you can run:\n'
     printf '  echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BIN_DIR"
