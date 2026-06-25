@@ -5,6 +5,12 @@
 ## 一行安装
 
 ```bash
+curl -fsSL https://cdn.jsdelivr.net/gh/justdoswift/bosscli@main/install-node.sh | bash
+```
+
+备用 GitHub raw 地址：
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/justdoswift/bosscli/main/install-node.sh | bash
 ```
 
@@ -31,7 +37,7 @@ bosscli --help
 自定义安装目录：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justdoswift/bosscli/main/install-node.sh | \
+curl -fsSL https://cdn.jsdelivr.net/gh/justdoswift/bosscli@main/install-node.sh | \
   BOSSCLI_INSTALL_DIR="$HOME/.local/share/bosscli" \
   BOSSCLI_BIN_DIR="$HOME/.local/bin" \
   BOSSCLI_REF="main" \
@@ -41,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/justdoswift/bosscli/main/install-no
 升级：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justdoswift/bosscli/main/install-node.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/justdoswift/bosscli@main/install-node.sh | bash
 ```
 
 卸载程序文件：
