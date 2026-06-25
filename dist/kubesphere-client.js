@@ -309,7 +309,10 @@ export class KubeSphereClient {
             return;
         }
         if (channel === 3) {
-            await options.onErrorChannel?.(payload);
+            const statusError = parseExecStatusError(payload);
+            if (statusError) {
+                await options.onErrorChannel?.(Buffer.from(statusError));
+            }
         }
     }
     async storeCookies(headers) {
@@ -320,6 +323,26 @@ export class KubeSphereClient {
                 ? [headers.get("set-cookie")]
                 : [];
         mergeCookieJar(this.cookieJar, parseSetCookieHeaders(setCookieHeaders));
+    }
+}
+export function parseExecStatusError(payload) {
+    const text = Buffer.isBuffer(payload) ? payload.toString("utf8").trim() : payload.trim();
+    if (!text) {
+        return undefined;
+    }
+    try {
+        const status = JSON.parse(text);
+        if (status.status === "Success") {
+            return undefined;
+        }
+        const causes = status.details?.causes
+            ?.map((cause) => [cause.reason, cause.message].filter(Boolean).join(": "))
+            .filter(Boolean);
+        const parts = [status.status, status.reason, status.message, ...(causes ?? [])].filter(Boolean);
+        return parts.length > 0 ? `exec 状态失败：${parts.join("；")}` : text;
+    }
+    catch {
+        return text;
     }
 }
 export function deploymentReplicaSetNames(replicaSets, deploymentName) {

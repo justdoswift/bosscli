@@ -32,6 +32,7 @@ export declare class KubeSphereClient {
     private handleExecMessage;
     private storeCookies;
 }
+export declare function parseExecStatusError(payload: Buffer | string): string | undefined;
 export declare function deploymentReplicaSetNames(replicaSets: Array<{
     metadata?: KubeObjectMeta;
 }>, deploymentName: string): Set<string>;

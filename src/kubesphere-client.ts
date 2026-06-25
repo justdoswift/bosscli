@@ -88,6 +88,18 @@ interface KubeReplicaSet {
   metadata?: KubeObjectMeta;
 }
 
+interface ExecStatus {
+  status?: string;
+  message?: string;
+  reason?: string;
+  details?: {
+    causes?: Array<{
+      reason?: string;
+      message?: string;
+    }>;
+  };
+}
+
 export class KubeSphereClient {
   readonly baseUrl: string;
 
@@ -469,7 +481,10 @@ export class KubeSphereClient {
     }
 
     if (channel === 3) {
-      await options.onErrorChannel?.(payload);
+      const statusError = parseExecStatusError(payload);
+      if (statusError) {
+        await options.onErrorChannel?.(Buffer.from(statusError));
+      }
     }
   }
 
@@ -483,6 +498,31 @@ export class KubeSphereClient {
           : [];
 
     mergeCookieJar(this.cookieJar, parseSetCookieHeaders(setCookieHeaders));
+  }
+}
+
+export function parseExecStatusError(payload: Buffer | string): string | undefined {
+  const text = Buffer.isBuffer(payload) ? payload.toString("utf8").trim() : payload.trim();
+
+  if (!text) {
+    return undefined;
+  }
+
+  try {
+    const status = JSON.parse(text) as ExecStatus;
+
+    if (status.status === "Success") {
+      return undefined;
+    }
+
+    const causes = status.details?.causes
+      ?.map((cause) => [cause.reason, cause.message].filter(Boolean).join(": "))
+      .filter(Boolean);
+    const parts = [status.status, status.reason, status.message, ...(causes ?? [])].filter(Boolean);
+
+    return parts.length > 0 ? `exec 状态失败：${parts.join("；")}` : text;
+  } catch {
+    return text;
   }
 }
 

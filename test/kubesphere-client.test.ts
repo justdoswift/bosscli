@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deploymentReplicaSetNames,
+  parseExecStatusError,
   podBelongsToDeployment
 } from "../src/kubesphere-client.js";
 
@@ -50,5 +51,24 @@ describe("kubesphere client helpers", () => {
         replicaSetNames
       )
     ).toBe(false);
+  });
+
+  it("ignores successful exec status channel payloads", () => {
+    expect(parseExecStatusError('{"metadata":{},"status":"Success"}')).toBeUndefined();
+  });
+
+  it("keeps failed exec status channel payloads as errors", () => {
+    expect(
+      parseExecStatusError(
+        JSON.stringify({
+          status: "Failure",
+          reason: "NonZeroExitCode",
+          message: "command terminated with non-zero exit code",
+          details: {
+            causes: [{ reason: "ExitCode", message: "1" }]
+          }
+        })
+      )
+    ).toContain("NonZeroExitCode");
   });
 });
