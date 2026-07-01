@@ -33,6 +33,7 @@ describe("progress", () => {
 
   it("formats diagnostic dump rates", () => {
     expect(formatProgressRate(2048, 2000)).toBe("1KiB/s");
+    expect(formatProgressRate(593, 1000)).toBe("593B/s");
   });
 
   it("formats table progress without rounding unfinished work to 100%", () => {

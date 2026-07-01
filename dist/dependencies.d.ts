@@ -37,7 +37,7 @@ export interface DependencyExportOptions {
     target: DependencyTarget;
     remoteJarPath: string;
     outputRoot: string;
-    onProgress?: (message: string) => void;
+    onProgress?: (progress: DependencyExportProgress) => void;
 }
 export interface DependencyExportResult {
     outputDir: string;
@@ -46,6 +46,13 @@ export interface DependencyExportResult {
     manifestPath: string;
     dependenciesPath: string;
     dependencyCount: number;
+}
+export interface DependencyExportProgress {
+    stage: "download" | "parse";
+    message: string;
+    currentBytes?: number;
+    totalBytes?: number;
+    method?: "direct" | "stable";
 }
 export declare function buildDiscoverJarCommand(scanDirs?: string[]): string;
 export declare function buildDiscoverTopLevelArchiveCommand(scanDirs?: string[]): string;
@@ -64,6 +71,11 @@ export declare function downloadRemoteFile(options: {
     target: Omit<DependencyTarget, "workload">;
     remotePath: string;
     outputPath: string;
+    onProgress?: (progress: {
+        currentBytes: number;
+        totalBytes?: number;
+        method: "direct" | "stable";
+    }) => void;
 }): Promise<void>;
 export declare function extractDependencyJars(appJarPath: string, libsDir: string): Promise<DependencyJarInfo[]>;
 export declare function readMavenCoordinates(jarPath: string): Promise<{

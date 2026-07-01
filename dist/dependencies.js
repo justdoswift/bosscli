@@ -143,14 +143,28 @@ export async function exportJavaDependencies(options) {
     await fsp.mkdir(libsDir, { recursive: true });
     const appJarFileName = sanitizeFileName(path.basename(options.remoteJarPath));
     const appJarPath = path.join(appDir, appJarFileName);
-    options.onProgress?.(`下载应用包：${options.remoteJarPath}`);
+    options.onProgress?.({
+        stage: "download",
+        message: `下载应用包：${options.remoteJarPath}`,
+        currentBytes: 0
+    });
     await downloadRemoteFile({
         client: options.client,
         target: options.target,
         remotePath: options.remoteJarPath,
-        outputPath: appJarPath
+        outputPath: appJarPath,
+        onProgress: (progress) => {
+            options.onProgress?.({
+                stage: "download",
+                message: `下载应用包：${options.remoteJarPath}`,
+                ...progress
+            });
+        }
     });
-    options.onProgress?.("解析依赖 jar");
+    options.onProgress?.({
+        stage: "parse",
+        message: "解析依赖 jar"
+    });
     const dependencies = await extractDependencyJars(appJarPath, libsDir);
     const appStats = await fileStats(appJarPath);
     const manifest = buildDependencyManifest({
@@ -176,8 +190,15 @@ export async function exportJavaDependencies(options) {
 }
 export async function downloadRemoteFile(options) {
     const expectedSize = await getRemoteFileSize(options);
+    const emitProgress = (progress) => {
+        options.onProgress?.({
+            ...progress,
+            totalBytes: progress.totalBytes ?? expectedSize
+        });
+    };
+    emitProgress({ currentBytes: 0, method: "direct" });
     try {
-        await downloadRemoteFileDirect(options);
+        await downloadRemoteFileDirect({ ...options, onProgress: emitProgress });
         await assertDownloadedSize(options.outputPath, expectedSize);
     }
     catch (error) {
@@ -185,7 +206,8 @@ export async function downloadRemoteFile(options) {
             throw error;
         }
         await fsp.rm(options.outputPath, { force: true });
-        await downloadRemoteFileViaInteractiveBase64(options);
+        emitProgress({ currentBytes: 0, method: "stable" });
+        await downloadRemoteFileViaInteractiveBase64({ ...options, onProgress: emitProgress });
         await assertDownloadedSize(options.outputPath, expectedSize);
     }
 }
@@ -221,6 +243,7 @@ async function downloadRemoteFileDirect(options) {
     const output = fs.createWriteStream(options.outputPath);
     const stderrChunks = [];
     const errorChunks = [];
+    let downloadedBytes = 0;
     try {
         await options.client.streamExecOutput({
             namespace: options.target.namespace,
@@ -229,9 +252,14 @@ async function downloadRemoteFileDirect(options) {
             command: ["sh", "-lc", `cat -- ${shellQuote(options.remotePath)}`],
             timeoutMs: 600000,
             onStdout: async (chunk) => {
+                downloadedBytes += chunk.length;
                 if (!output.write(chunk)) {
                     await once(output, "drain");
                 }
+                options.onProgress?.({
+                    currentBytes: downloadedBytes,
+                    method: "direct"
+                });
             },
             onStderr: (chunk) => {
                 stderrChunks.push(chunk);
@@ -262,6 +290,7 @@ async function downloadRemoteFileViaInteractiveBase64(options) {
     let base64Remainder = "";
     let exitStatus;
     let foundEnd = false;
+    let downloadedBytes = 0;
     const writeDecodedBase64 = async (text, final = false) => {
         const cleanText = `${base64Remainder}${text}`.replace(/[^A-Za-z0-9+/=]/g, "");
         const decodeLength = final ? cleanText.length : cleanText.length - (cleanText.length % 4);
@@ -270,6 +299,11 @@ async function downloadRemoteFileViaInteractiveBase64(options) {
             if (!output.write(decoded)) {
                 await once(output, "drain");
             }
+            downloadedBytes += decoded.length;
+            options.onProgress?.({
+                currentBytes: downloadedBytes,
+                method: "stable"
+            });
         }
         base64Remainder = cleanText.slice(decodeLength);
     };

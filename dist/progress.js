@@ -80,6 +80,9 @@ export function formatDuration(elapsedMs) {
     return `${minutes}m${String(remainingSeconds).padStart(2, "0")}s`;
 }
 function formatRate(bytesPerSecond) {
+    if (bytesPerSecond < 1024) {
+        return `${Math.round(bytesPerSecond)}B/s`;
+    }
     return `${formatBytes(bytesPerSecond).replace(/\.0(?= )/, "").replace(" ", "")}/s`;
 }
 export function formatProgressRate(bytes, elapsedMs) {

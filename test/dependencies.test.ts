@@ -114,6 +114,7 @@ describe("dependencies", () => {
     const fullContent = Buffer.from("complete application archive");
     const partialContent = fullContent.subarray(0, 8);
     let usedFallback = false;
+    const progressSnapshots: Array<{ currentBytes: number; totalBytes?: number; method: string }> = [];
 
     const client = {
       execCommand: vi.fn().mockResolvedValue({
@@ -143,11 +144,29 @@ describe("dependencies", () => {
         container: "container-server"
       },
       remotePath: "/opt/saas/server.war",
-      outputPath
+      outputPath,
+      onProgress: (progress) => {
+        progressSnapshots.push(progress);
+      }
     });
 
     await expect(fsp.readFile(outputPath)).resolves.toEqual(fullContent);
     expect(usedFallback).toBe(true);
+    expect(progressSnapshots).toContainEqual({
+      currentBytes: 0,
+      totalBytes: fullContent.length,
+      method: "direct"
+    });
+    expect(progressSnapshots).toContainEqual({
+      currentBytes: 0,
+      totalBytes: fullContent.length,
+      method: "stable"
+    });
+    expect(progressSnapshots.at(-1)).toEqual({
+      currentBytes: fullContent.length,
+      totalBytes: fullContent.length,
+      method: "stable"
+    });
   });
 
   it("does not retry non-transient read-only exec errors", async () => {

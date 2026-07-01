@@ -54,7 +54,7 @@ export interface DependencyExportOptions {
   target: DependencyTarget;
   remoteJarPath: string;
   outputRoot: string;
-  onProgress?: (message: string) => void;
+  onProgress?: (progress: DependencyExportProgress) => void;
 }
 
 export interface DependencyExportResult {
@@ -64,6 +64,14 @@ export interface DependencyExportResult {
   manifestPath: string;
   dependenciesPath: string;
   dependencyCount: number;
+}
+
+export interface DependencyExportProgress {
+  stage: "download" | "parse";
+  message: string;
+  currentBytes?: number;
+  totalBytes?: number;
+  method?: "direct" | "stable";
 }
 
 export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS): string {
@@ -265,15 +273,29 @@ export async function exportJavaDependencies(options: DependencyExportOptions): 
 
   const appJarFileName = sanitizeFileName(path.basename(options.remoteJarPath));
   const appJarPath = path.join(appDir, appJarFileName);
-  options.onProgress?.(`下载应用包：${options.remoteJarPath}`);
+  options.onProgress?.({
+    stage: "download",
+    message: `下载应用包：${options.remoteJarPath}`,
+    currentBytes: 0
+  });
   await downloadRemoteFile({
     client: options.client,
     target: options.target,
     remotePath: options.remoteJarPath,
-    outputPath: appJarPath
+    outputPath: appJarPath,
+    onProgress: (progress) => {
+      options.onProgress?.({
+        stage: "download",
+        message: `下载应用包：${options.remoteJarPath}`,
+        ...progress
+      });
+    }
   });
 
-  options.onProgress?.("解析依赖 jar");
+  options.onProgress?.({
+    stage: "parse",
+    message: "解析依赖 jar"
+  });
   const dependencies = await extractDependencyJars(appJarPath, libsDir);
   const appStats = await fileStats(appJarPath);
   const manifest = buildDependencyManifest({
@@ -304,11 +326,28 @@ export async function downloadRemoteFile(options: {
   target: Omit<DependencyTarget, "workload">;
   remotePath: string;
   outputPath: string;
+  onProgress?: (progress: {
+    currentBytes: number;
+    totalBytes?: number;
+    method: "direct" | "stable";
+  }) => void;
 }): Promise<void> {
   const expectedSize = await getRemoteFileSize(options);
+  const emitProgress = (progress: {
+    currentBytes: number;
+    totalBytes?: number;
+    method: "direct" | "stable";
+  }) => {
+    options.onProgress?.({
+      ...progress,
+      totalBytes: progress.totalBytes ?? expectedSize
+    });
+  };
+
+  emitProgress({ currentBytes: 0, method: "direct" });
 
   try {
-    await downloadRemoteFileDirect(options);
+    await downloadRemoteFileDirect({ ...options, onProgress: emitProgress });
     await assertDownloadedSize(options.outputPath, expectedSize);
   } catch (error) {
     if (!isRecoverableDownloadError(error)) {
@@ -316,7 +355,8 @@ export async function downloadRemoteFile(options: {
     }
 
     await fsp.rm(options.outputPath, { force: true });
-    await downloadRemoteFileViaInteractiveBase64(options);
+    emitProgress({ currentBytes: 0, method: "stable" });
+    await downloadRemoteFileViaInteractiveBase64({ ...options, onProgress: emitProgress });
     await assertDownloadedSize(options.outputPath, expectedSize);
   }
 }
@@ -362,10 +402,16 @@ async function downloadRemoteFileDirect(options: {
   target: Omit<DependencyTarget, "workload">;
   remotePath: string;
   outputPath: string;
+  onProgress?: (progress: {
+    currentBytes: number;
+    totalBytes?: number;
+    method: "direct" | "stable";
+  }) => void;
 }): Promise<void> {
   const output = fs.createWriteStream(options.outputPath);
   const stderrChunks: Buffer[] = [];
   const errorChunks: Buffer[] = [];
+  let downloadedBytes = 0;
 
   try {
     await options.client.streamExecOutput({
@@ -375,9 +421,14 @@ async function downloadRemoteFileDirect(options: {
       command: ["sh", "-lc", `cat -- ${shellQuote(options.remotePath)}`],
       timeoutMs: 600000,
       onStdout: async (chunk) => {
+        downloadedBytes += chunk.length;
         if (!output.write(chunk)) {
           await once(output, "drain");
         }
+        options.onProgress?.({
+          currentBytes: downloadedBytes,
+          method: "direct"
+        });
       },
       onStderr: (chunk) => {
         stderrChunks.push(chunk);
@@ -404,6 +455,11 @@ async function downloadRemoteFileViaInteractiveBase64(options: {
   target: Omit<DependencyTarget, "workload">;
   remotePath: string;
   outputPath: string;
+  onProgress?: (progress: {
+    currentBytes: number;
+    totalBytes?: number;
+    method: "direct" | "stable";
+  }) => void;
 }): Promise<void> {
   const output = fs.createWriteStream(options.outputPath);
   const token = crypto.randomUUID().replace(/-/g, "");
@@ -414,6 +470,7 @@ async function downloadRemoteFileViaInteractiveBase64(options: {
   let base64Remainder = "";
   let exitStatus: string | undefined;
   let foundEnd = false;
+  let downloadedBytes = 0;
 
   const writeDecodedBase64 = async (text: string, final = false) => {
     const cleanText = `${base64Remainder}${text}`.replace(/[^A-Za-z0-9+/=]/g, "");
@@ -424,6 +481,11 @@ async function downloadRemoteFileViaInteractiveBase64(options: {
       if (!output.write(decoded)) {
         await once(output, "drain");
       }
+      downloadedBytes += decoded.length;
+      options.onProgress?.({
+        currentBytes: downloadedBytes,
+        method: "stable"
+      });
     }
 
     base64Remainder = cleanText.slice(decodeLength);

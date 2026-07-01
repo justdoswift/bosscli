@@ -104,6 +104,10 @@ export function formatDuration(elapsedMs: number): string {
 }
 
 function formatRate(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024) {
+    return `${Math.round(bytesPerSecond)}B/s`;
+  }
+
   return `${formatBytes(bytesPerSecond).replace(/\.0(?= )/, "").replace(" ", "")}/s`;
 }
 

@@ -316,6 +316,9 @@ async function runDepsFlow(options) {
     console.log(`  output:    ${outputRoot}`);
     const progress = new ProgressBar();
     let progressStarted = false;
+    let lastDependencyProgressAt = 0;
+    let lastDependencyProgressBytes = -1;
+    let lastDependencyProgressMethod;
     try {
         const result = await exportJavaDependencies({
             client,
@@ -327,9 +330,35 @@ async function runDepsFlow(options) {
             },
             remoteJarPath,
             outputRoot,
-            onProgress: (message) => {
+            onProgress: (snapshot) => {
                 progressStarted = true;
-                progress.updateText(`依赖获取  ${message}`);
+                if (snapshot.stage === "download" && typeof snapshot.currentBytes === "number") {
+                    const now = Date.now();
+                    const methodChanged = snapshot.method !== lastDependencyProgressMethod;
+                    const byteDelta = snapshot.currentBytes - lastDependencyProgressBytes;
+                    const completed = typeof snapshot.totalBytes === "number" &&
+                        snapshot.totalBytes > 0 &&
+                        snapshot.currentBytes >= snapshot.totalBytes;
+                    const shouldRender = methodChanged ||
+                        lastDependencyProgressAt === 0 ||
+                        now - lastDependencyProgressAt >= 500 ||
+                        byteDelta >= 256 * 1024 ||
+                        completed;
+                    if (!shouldRender) {
+                        return;
+                    }
+                    lastDependencyProgressAt = now;
+                    lastDependencyProgressBytes = snapshot.currentBytes;
+                    lastDependencyProgressMethod = snapshot.method;
+                    progress.update({
+                        label: "依赖获取",
+                        currentBytes: snapshot.currentBytes,
+                        totalBytes: snapshot.totalBytes,
+                        extra: snapshot.method === "stable" ? "稳定下载" : "下载应用包"
+                    });
+                    return;
+                }
+                progress.updateText(`依赖获取  ${snapshot.message}`);
             }
         });
         progress.done(`依赖获取完成：${result.outputDir}`);
