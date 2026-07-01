@@ -356,7 +356,7 @@ redis.action(async (options: RedisOptions, command: Command) => {
   await runRedisFlow(mergeCommandOptions<RedisOptions>(options, command));
 });
 
-const deps = program.command("deps").description("获取 Java 服务依赖 jar");
+const deps = program.command("deps").description("获取 Java 服务依赖 jar/war");
 addConnectionOptions(deps);
 addDepsOptions(deps);
 deps.action(async (options: DepsOptions, command: Command) => {
@@ -476,7 +476,7 @@ function addDepsOptions(command: Command): void {
     .option("-s, --service <service>", "工作负载名称（兼容旧参数）")
     .option("--pod <pod>", "Pod 名称")
     .option("-c, --container <container>", "容器名称")
-    .option("--jar-path <path>", "容器内应用 jar 路径")
+    .option("--jar-path <path>", "容器内应用 jar/war 路径")
     .option("-o, --output-dir <dir>", "输出目录");
 }
 
@@ -539,7 +539,7 @@ async function runDepsFlow(options: DepsOptions): Promise<void> {
   console.log(`  workload:  ${target.name}`);
   console.log(`  pod:       ${pod.name}`);
   console.log(`  container: ${container}`);
-  console.log(`  jar:       ${remoteJarPath}`);
+  console.log(`  jar/war:   ${remoteJarPath}`);
   console.log(`  output:    ${outputRoot}`);
 
   const progress = new ProgressBar();
@@ -561,7 +561,7 @@ async function runDepsFlow(options: DepsOptions): Promise<void> {
       }
     });
     progress.done(`依赖获取完成：${result.outputDir}`);
-    console.log(`应用 jar：${result.appJarPath}`);
+    console.log(`应用包：${result.appJarPath}`);
     console.log(`依赖目录：${result.libsDir}`);
     console.log(`依赖数量：${result.dependencyCount}`);
     console.log(`清单：${result.dependenciesPath}`);

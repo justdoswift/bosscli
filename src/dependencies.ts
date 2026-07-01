@@ -65,6 +65,8 @@ export interface DependencyExportResult {
 }
 
 export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS): string {
+  const findArchiveExpression = "\\( -name '*.jar' -o -name '*.war' \\)";
+
   return [
     "for cmdline in /proc/[0-9]*/cmdline; do",
     "  [ -r \"$cmdline\" ] || continue",
@@ -80,7 +82,7 @@ export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS)
     "done",
     ...scanDirs.map(
       (dir) =>
-        `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`
+        `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f ${findArchiveExpression} -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`
     ),
     "exit 0"
   ].join("\n");
@@ -95,7 +97,7 @@ export function parseJarCandidateLines(output: string): JarCandidate[] {
     const jarPath = pathParts.join("\t").trim();
     const source = rawSource === "process" ? "process" : rawSource === "provided" ? "provided" : "scan";
 
-    if (!jarPath || !jarPath.endsWith(".jar") || seen.has(jarPath)) {
+    if (!jarPath || !isJavaArchivePath(jarPath) || seen.has(jarPath)) {
       continue;
     }
 
@@ -147,22 +149,47 @@ export async function discoverJarCandidates(
   client: KubeSphereClient,
   target: Omit<DependencyTarget, "workload">
 ): Promise<JarCandidate[]> {
-  const result = await client.execCommand({
-    namespace: target.namespace,
-    pod: target.pod,
-    container: target.container,
-    command: ["sh", "-lc", buildDiscoverJarCommand()],
-    timeoutMs: 60000
-  });
+  const result = await runReadOnlyExecWithRetry(() =>
+    client.execCommand({
+      namespace: target.namespace,
+      pod: target.pod,
+      container: target.container,
+      command: ["sh", "-lc", buildDiscoverJarCommand()],
+      timeoutMs: 60000
+    })
+  );
 
   if (result.error.trim()) {
-    throw new Error(`查找 jar 失败：${result.error.trim()}`);
+    throw new Error(`查找 jar/war 失败：${result.error.trim()}`);
   }
   if (result.stderr.trim() && !result.stdout.trim()) {
-    throw new Error(`查找 jar 失败：${result.stderr.trim()}`);
+    throw new Error(`查找 jar/war 失败：${result.stderr.trim()}`);
   }
 
   return parseJarCandidateLines(result.stdout);
+}
+
+export async function runReadOnlyExecWithRetry<T>(
+  operation: () => Promise<T>,
+  options: { attempts?: number; delayMs?: number } = {}
+): Promise<T> {
+  const attempts = options.attempts ?? 3;
+  const delayMs = options.delayMs ?? 500;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isTransientExecError(error)) {
+        throw error;
+      }
+      await delay(delayMs * attempt);
+    }
+  }
+
+  throw lastError;
 }
 
 export async function exportJavaDependencies(options: DependencyExportOptions): Promise<DependencyExportResult> {
@@ -174,7 +201,7 @@ export async function exportJavaDependencies(options: DependencyExportOptions): 
 
   const appJarFileName = sanitizeFileName(path.basename(options.remoteJarPath));
   const appJarPath = path.join(appDir, appJarFileName);
-  options.onProgress?.(`下载应用 jar：${options.remoteJarPath}`);
+  options.onProgress?.(`下载应用包：${options.remoteJarPath}`);
   await downloadRemoteFile({
     client: options.client,
     target: options.target,
@@ -246,7 +273,7 @@ export async function downloadRemoteFile(options: {
   const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
   if (error || stderr) {
     await fsp.rm(options.outputPath, { force: true });
-    throw new Error(`下载 jar 失败：${error || stderr}`);
+    throw new Error(`下载应用包失败：${error || stderr}`);
   }
 }
 
@@ -342,8 +369,8 @@ export function formatDependenciesText(manifest: DependencyManifest): string {
     `服务：${manifest.target.namespace} / ${manifest.target.workload}`,
     `Pod：${manifest.target.pod}`,
     `容器：${manifest.target.container}`,
-    `远端 jar：${manifest.remoteJarPath}`,
-    `应用 jar：${manifest.appJar.fileName} (${formatBytes(manifest.appJar.size)})`,
+    `远端应用包：${manifest.remoteJarPath}`,
+    `应用包：${manifest.appJar.fileName} (${formatBytes(manifest.appJar.size)})`,
     `依赖数量：${manifest.dependencies.length}`,
     ""
   ];
@@ -390,7 +417,32 @@ function candidatePriority(candidate: JarCandidate): number {
   if (/\/(?:target|build)\//.test(candidate.path)) {
     return 3;
   }
-  return 2;
+  if (isLikelyAppArchive(candidate.path)) {
+    return 2;
+  }
+  if (/\/(?:agent|optional-plugins)\//.test(candidate.path)) {
+    return 5;
+  }
+  return 4;
+}
+
+function isJavaArchivePath(filePath: string): boolean {
+  return /\.(?:jar|war)$/i.test(filePath);
+}
+
+function isLikelyAppArchive(filePath: string): boolean {
+  return /^\/(?:app|opt\/saas|deployments|workspace)\/[^/]+\.(?:jar|war)$/i.test(filePath);
+}
+
+function isTransientExecError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /socket hang up|ECONNRESET|WebSocket was closed before the connection was established/i.test(message);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function isDependencyJarEntry(fileName: string): boolean {

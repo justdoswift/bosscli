@@ -52,6 +52,10 @@ export declare function jarPathFromJavaArgs(args: string[], cwd?: string): strin
 export declare function sortJarCandidates(candidates: JarCandidate[]): JarCandidate[];
 export declare function buildDependencyOutputDir(homeDir: string, target: Pick<DependencyTarget, "namespace" | "workload">, date?: Date): string;
 export declare function discoverJarCandidates(client: KubeSphereClient, target: Omit<DependencyTarget, "workload">): Promise<JarCandidate[]>;
+export declare function runReadOnlyExecWithRetry<T>(operation: () => Promise<T>, options?: {
+    attempts?: number;
+    delayMs?: number;
+}): Promise<T>;
 export declare function exportJavaDependencies(options: DependencyExportOptions): Promise<DependencyExportResult>;
 export declare function downloadRemoteFile(options: {
     client: KubeSphereClient;

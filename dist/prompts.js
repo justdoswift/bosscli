@@ -444,13 +444,13 @@ export async function chooseJarCandidate(candidates, provided) {
         return provided;
     }
     if (candidates.length === 0) {
-        throw new Error("没有找到可用的 Java 应用 jar，请使用 --jar-path 指定");
+        throw new Error("没有找到可用的 Java 应用 jar/war，请使用 --jar-path 指定");
     }
     if (candidates.length === 1) {
         return candidates[0].path;
     }
     return search({
-        message: "选择应用 jar",
+        message: "选择应用 jar/war",
         pageSize: 12,
         source: (term) => filterJarCandidateChoices(candidates, term)
     });

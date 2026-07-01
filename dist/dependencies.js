@@ -8,6 +8,7 @@ import * as yauzl from "yauzl";
 import { formatBytes, sanitizeFileName, shellQuote, timestampForFile } from "./utils.js";
 export const DEFAULT_DEPENDENCY_SCAN_DIRS = ["/app", "/opt", "/deployments", "/workspace"];
 export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS) {
+    const findArchiveExpression = "\\( -name '*.jar' -o -name '*.war' \\)";
     return [
         "for cmdline in /proc/[0-9]*/cmdline; do",
         "  [ -r \"$cmdline\" ] || continue",
@@ -21,7 +22,7 @@ export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS)
         "  esac",
         "  [ -f \"$jar_path\" ] && printf 'process\\t%s\\n' \"$jar_path\"",
         "done",
-        ...scanDirs.map((dir) => `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`),
+        ...scanDirs.map((dir) => `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f ${findArchiveExpression} -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`),
         "exit 0"
     ].join("\n");
 }
@@ -32,7 +33,7 @@ export function parseJarCandidateLines(output) {
         const [rawSource, ...pathParts] = line.split("\t");
         const jarPath = pathParts.join("\t").trim();
         const source = rawSource === "process" ? "process" : rawSource === "provided" ? "provided" : "scan";
-        if (!jarPath || !jarPath.endsWith(".jar") || seen.has(jarPath)) {
+        if (!jarPath || !isJavaArchivePath(jarPath) || seen.has(jarPath)) {
             continue;
         }
         seen.add(jarPath);
@@ -61,20 +62,38 @@ export function buildDependencyOutputDir(homeDir, target, date = new Date()) {
     return path.join(homeDir, "Downloads", "bosscli", "dependencies", sanitizeFileName(target.namespace), sanitizeFileName(target.workload), timestampForFile(date));
 }
 export async function discoverJarCandidates(client, target) {
-    const result = await client.execCommand({
+    const result = await runReadOnlyExecWithRetry(() => client.execCommand({
         namespace: target.namespace,
         pod: target.pod,
         container: target.container,
         command: ["sh", "-lc", buildDiscoverJarCommand()],
         timeoutMs: 60000
-    });
+    }));
     if (result.error.trim()) {
-        throw new Error(`查找 jar 失败：${result.error.trim()}`);
+        throw new Error(`查找 jar/war 失败：${result.error.trim()}`);
     }
     if (result.stderr.trim() && !result.stdout.trim()) {
-        throw new Error(`查找 jar 失败：${result.stderr.trim()}`);
+        throw new Error(`查找 jar/war 失败：${result.stderr.trim()}`);
     }
     return parseJarCandidateLines(result.stdout);
+}
+export async function runReadOnlyExecWithRetry(operation, options = {}) {
+    const attempts = options.attempts ?? 3;
+    const delayMs = options.delayMs ?? 500;
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            return await operation();
+        }
+        catch (error) {
+            lastError = error;
+            if (attempt >= attempts || !isTransientExecError(error)) {
+                throw error;
+            }
+            await delay(delayMs * attempt);
+        }
+    }
+    throw lastError;
 }
 export async function exportJavaDependencies(options) {
     const outputDir = options.outputRoot;
@@ -84,7 +103,7 @@ export async function exportJavaDependencies(options) {
     await fsp.mkdir(libsDir, { recursive: true });
     const appJarFileName = sanitizeFileName(path.basename(options.remoteJarPath));
     const appJarPath = path.join(appDir, appJarFileName);
-    options.onProgress?.(`下载应用 jar：${options.remoteJarPath}`);
+    options.onProgress?.(`下载应用包：${options.remoteJarPath}`);
     await downloadRemoteFile({
         client: options.client,
         target: options.target,
@@ -147,7 +166,7 @@ export async function downloadRemoteFile(options) {
     const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
     if (error || stderr) {
         await fsp.rm(options.outputPath, { force: true });
-        throw new Error(`下载 jar 失败：${error || stderr}`);
+        throw new Error(`下载应用包失败：${error || stderr}`);
     }
 }
 export async function extractDependencyJars(appJarPath, libsDir) {
@@ -229,8 +248,8 @@ export function formatDependenciesText(manifest) {
         `服务：${manifest.target.namespace} / ${manifest.target.workload}`,
         `Pod：${manifest.target.pod}`,
         `容器：${manifest.target.container}`,
-        `远端 jar：${manifest.remoteJarPath}`,
-        `应用 jar：${manifest.appJar.fileName} (${formatBytes(manifest.appJar.size)})`,
+        `远端应用包：${manifest.remoteJarPath}`,
+        `应用包：${manifest.appJar.fileName} (${formatBytes(manifest.appJar.size)})`,
         `依赖数量：${manifest.dependencies.length}`,
         ""
     ];
@@ -265,7 +284,28 @@ function candidatePriority(candidate) {
     if (/\/(?:target|build)\//.test(candidate.path)) {
         return 3;
     }
-    return 2;
+    if (isLikelyAppArchive(candidate.path)) {
+        return 2;
+    }
+    if (/\/(?:agent|optional-plugins)\//.test(candidate.path)) {
+        return 5;
+    }
+    return 4;
+}
+function isJavaArchivePath(filePath) {
+    return /\.(?:jar|war)$/i.test(filePath);
+}
+function isLikelyAppArchive(filePath) {
+    return /^\/(?:app|opt\/saas|deployments|workspace)\/[^/]+\.(?:jar|war)$/i.test(filePath);
+}
+function isTransientExecError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /socket hang up|ECONNRESET|WebSocket was closed before the connection was established/i.test(message);
+}
+function delay(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 function isDependencyJarEntry(fileName) {
     return (/^BOOT-INF\/lib\/[^/]+\.jar$/.test(fileName) ||

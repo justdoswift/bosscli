@@ -11,6 +11,7 @@ import {
   jarPathFromJavaArgs,
   parseJarCandidateLines,
   parsePomProperties,
+  runReadOnlyExecWithRetry,
   sortJarCandidates,
   type DependencyJarInfo
 } from "../src/dependencies.js";
@@ -24,10 +25,12 @@ describe("dependencies", () => {
     expect(jarPathFromJavaArgs(["java", "org.example.Main"])).toBeUndefined();
   });
 
-  it("parses and sorts jar candidates", () => {
+  it("parses and sorts Java archive candidates", () => {
     const candidates = parseJarCandidateLines(
       [
         "scan\t/opt/app/helper.jar",
+        "scan\t/opt/saas/tax-workflow-server.war",
+        "scan\t/opt/saas/agent/skywalking-agent.jar",
         "process\t/app/server.jar",
         "scan\t/opt/app/helper.jar",
         "scan\t/opt/app/readme.txt"
@@ -36,7 +39,9 @@ describe("dependencies", () => {
 
     expect(candidates).toEqual([
       { source: "process", path: "/app/server.jar" },
-      { source: "scan", path: "/opt/app/helper.jar" }
+      { source: "scan", path: "/opt/saas/tax-workflow-server.war" },
+      { source: "scan", path: "/opt/app/helper.jar" },
+      { source: "scan", path: "/opt/saas/agent/skywalking-agent.jar" }
     ]);
     expect(sortJarCandidates([{ source: "provided", path: "/x/a.jar" }, { source: "process", path: "/x/b.jar" }])[0]?.source).toBe(
       "provided"
@@ -48,9 +53,41 @@ describe("dependencies", () => {
 
     expect(command).toContain("/proc/[0-9]*/cmdline");
     expect(command).toContain("awk 'prev == \"-jar\"");
-    expect(command).toContain("find '/app' -maxdepth 5 -type f -name '*.jar'");
+    expect(command).toContain("find '/app' -maxdepth 5 -type f \\( -name '*.jar' -o -name '*.war' \\)");
     expect(command).toContain("|| true");
     expect(command.endsWith("exit 0")).toBe(true);
+  });
+
+  it("retries transient read-only exec socket resets", async () => {
+    let attempts = 0;
+    const result = await runReadOnlyExecWithRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw new Error("socket hang up");
+        }
+        return "ok";
+      },
+      { attempts: 3, delayMs: 0 }
+    );
+
+    expect(result).toBe("ok");
+    expect(attempts).toBe(3);
+  });
+
+  it("does not retry non-transient read-only exec errors", async () => {
+    let attempts = 0;
+
+    await expect(
+      runReadOnlyExecWithRetry(
+        async () => {
+          attempts += 1;
+          throw new Error("permission denied");
+        },
+        { attempts: 3, delayMs: 0 }
+      )
+    ).rejects.toThrow("permission denied");
+    expect(attempts).toBe(1);
   });
 
   it("builds dependency output directories", () => {

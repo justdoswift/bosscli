@@ -316,9 +316,9 @@ bosscli mysql-backup \
 bosscli deps
 ```
 
-依赖获取会登录 KubeSphere，选择 namespace、工作负载、Pod 和容器后，从运行中的 Java 进程或常见目录中查找应用 jar。工具会把应用 jar 下载到本机，并在本机解析 `BOOT-INF/lib`、`WEB-INF/lib`、`lib` 中的依赖 jar，不依赖容器内安装 `jar` 或 `unzip`。
+依赖获取会登录 KubeSphere，选择 namespace、工作负载、Pod 和容器后，从运行中的 Java 进程或常见目录中查找应用 jar/war。工具会把应用包下载到本机，并在本机解析 `BOOT-INF/lib`、`WEB-INF/lib`、`lib` 中的依赖 jar，不依赖容器内安装 `jar` 或 `unzip`。
 
-工作负载和应用 jar 选择支持直接输入关键字搜索，方便在服务较多时快速定位。
+工作负载和应用 jar/war 选择支持直接输入关键字搜索，方便在服务较多时快速定位。
 
 默认输出到：
 
@@ -329,7 +329,7 @@ bosscli deps
 目录里会包含：
 
 ```text
-app/<service>.jar
+app/<service>.jar 或 app/<service>.war
 libs/*.jar
 dependencies.txt
 manifest.json
