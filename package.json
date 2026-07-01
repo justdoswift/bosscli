@@ -1,6 +1,6 @@
 {
   "name": "bosscli",
-  "version": "0.6.25",
+  "version": "0.6.26",
   "description": "Daily work toolkit CLI",
   "type": "module",
   "repository": {

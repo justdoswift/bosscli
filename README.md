@@ -322,14 +322,15 @@ bosscli deps
 
 工作负载和应用 jar/war 选择支持直接输入关键字搜索，方便在服务较多时快速定位。
 
-`检索依赖` 不下载完整应用包，会在当前 namespace 的所有工作负载里列出 jar/war 包内容并匹配依赖 jar 名称。依赖关键词是普通输入框，按回车并确认后才开始扫描，不会监听输入变化。可以输入完整 Maven 坐标，也可以模糊输入 artifactId：
+`检索依赖` 不下载完整应用包，会在当前 namespace 的所有工作负载里列出 jar/war 包内容并匹配依赖 jar 名称。依赖关键词是普通输入框，按回车并确认后才开始扫描，不会监听输入变化。扫描工作负载时默认并发 `4` 个，最多 `8` 个，可通过 `--concurrency` 调整。可以输入完整 Maven 坐标，也可以模糊输入 artifactId：
 
 ```bash
 bosscli deps \
   --profile 测试环境 \
   --namespace tax-digital \
   --deps-action search \
-  --search business-reimburse-sdk
+  --search business-reimburse-sdk \
+  --concurrency 4
 ```
 
 完整坐标如 `com.bosssoft:business-reimburse-sdk:1.3.20` 会优先按 `business-reimburse-sdk-1.3.20.jar` 精确匹配。这个模式依赖容器内有 `unzip` 或 `jar` 命令来列包内容；如果没有，会跳过对应目标并给出原因。

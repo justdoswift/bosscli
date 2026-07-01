@@ -85,7 +85,9 @@ import {
   parseDependencySearchQuery,
   searchClassInArchive,
   searchDependencyInArchive,
+  type DependencyClassSearchQuery,
   type DependencyClassSearchHit,
+  type DependencySearchQuery,
   type DependencySearchHit
 } from "./dependencies.js";
 import { formatDuration, formatProgressRate, formatTableProgressPercent, ProgressBar } from "./progress.js";
@@ -202,6 +204,7 @@ interface DepsOptions extends ConnectionOptions, KubeTargetOptions {
   depsAction?: DependencyAction;
   search?: string;
   classPath?: string;
+  concurrency?: number;
 }
 
 type DependencySearchCliHit = DependencySearchHit & {
@@ -215,6 +218,16 @@ type DependencyClassSearchCliHit = DependencyClassSearchHit & {
   pod: PodSummary;
   container: string;
 };
+
+interface DependencySearchTargetResult {
+  hits: DependencySearchCliHit[];
+  skipped: Array<{ target: string; reason: string }>;
+}
+
+interface DependencyClassSearchTargetResult {
+  hits: DependencyClassSearchCliHit[];
+  skipped: Array<{ target: string; reason: string }>;
+}
 
 interface MySqlBackupCliOptions {
   profile?: string;
@@ -504,6 +517,7 @@ function addDepsOptions(command: Command): void {
     .addOption(new Option("--deps-action <action>", "依赖操作").choices(["export", "search", "class"]))
     .option("--search <query>", "检索依赖坐标或关键词，例如 business-reimburse-sdk")
     .option("--class-path <classPath>", "检索类路径，例如 com.bosssoft.example.SomeClass")
+    .option("--concurrency <number>", "检索并发数，默认 4，最大 8", parsePositiveInteger)
     .option("-o, --output-dir <dir>", "输出目录");
 }
 
@@ -665,10 +679,11 @@ async function runDependencySearchFlow(client: KubeSphereClient, options: DepsOp
   if (targets.length === 0) {
     throw new Error(`namespace ${namespace} 中没有可检索的工作负载`);
   }
+  const concurrency = resolveDependencySearchConcurrency(options, targets.length);
 
   if (!options.search) {
     const shouldSearch = await confirm({
-      message: `确认开始检索 ${targets.length} 个工作负载？`,
+      message: `确认开始检索 ${targets.length} 个工作负载？并发 ${concurrency}`,
       default: true
     });
     if (!shouldSearch) {
@@ -684,77 +699,35 @@ async function runDependencySearchFlow(client: KubeSphereClient, options: DepsOp
     console.log(`  jar:       ${query.exactJarName}`);
   }
   console.log(`  workload:  ${options.workload ?? options.service ?? "全部工作负载"}`);
+  console.log(`  并发:      ${concurrency}`);
 
   const progress = new ProgressBar();
   const hits: DependencySearchCliHit[] = [];
   const skipped: Array<{ target: string; reason: string }> = [];
+  let completed = 0;
+  let active = 0;
+  const renderProgress = (current?: string) => {
+    progress.updateText(
+      `依赖检索  工作负载 ${completed}/${targets.length}  活跃 ${active}/${concurrency}  命中 ${hits.length}${
+        current ? `  当前 ${current}` : ""
+      }`
+    );
+  };
+  renderProgress();
 
-  for (const [index, target] of targets.entries()) {
-    progress.updateText(`依赖检索  工作负载 ${index + 1}/${targets.length}  命中 ${hits.length}  当前 ${target.name}`);
-
+  await runWithConcurrency(targets, concurrency, async (target) => {
+    active += 1;
+    renderProgress(target.name);
     try {
-      const pods = await client.listPodsForTarget(target);
-      if (pods.length === 0) {
-        skipped.push({ target: target.name, reason: "没有匹配的 Pod" });
-        continue;
-      }
-
-      const pod = options.pod ? await choosePod(pods, options.pod) : preferredScanPod(pods);
-      const containers = options.container
-        ? pod.containers.includes(options.container)
-          ? [options.container]
-          : []
-        : pod.containers;
-      if (containers.length === 0) {
-        skipped.push({
-          target: target.name,
-          reason: options.container
-            ? `Pod ${pod.name} 中没有容器 ${options.container}`
-            : `Pod ${pod.name} 没有可选容器`
-        });
-        continue;
-      }
-
-      for (const container of containers) {
-        const candidates = options.jarPath
-          ? [{ source: "provided" as const, path: options.jarPath }]
-          : await discoverJarCandidates(client, {
-              namespace,
-              pod: pod.name,
-              container
-            });
-
-        if (candidates.length === 0) {
-          skipped.push({ target: `${target.name}/${container}`, reason: "没有发现 jar/war" });
-          continue;
-        }
-
-        for (const candidate of candidates) {
-          const archiveHits = await searchDependencyInArchive({
-            client,
-            target: {
-              namespace,
-              pod: pod.name,
-              container
-            },
-            archivePath: candidate.path,
-            query
-          });
-
-          hits.push(
-            ...archiveHits.map((hit) => ({
-              ...hit,
-              target,
-              pod,
-              container
-            }))
-          );
-        }
-      }
-    } catch (error) {
-      skipped.push({ target: target.name, reason: error instanceof Error ? error.message : String(error) });
+      const result = await scanDependencyTarget(client, namespace, options, target, query);
+      hits.push(...result.hits);
+      skipped.push(...result.skipped);
+    } finally {
+      active -= 1;
+      completed += 1;
+      renderProgress(target.name);
     }
-  }
+  });
 
   progress.done(`依赖检索完成：命中 ${hits.length}，跳过 ${skipped.length}`);
   printDependencySearchResult(query.raw, hits, skipped);
@@ -774,10 +747,11 @@ async function runDependencyClassSearchFlow(client: KubeSphereClient, options: D
   if (targets.length === 0) {
     throw new Error(`namespace ${namespace} 中没有可检索的工作负载`);
   }
+  const concurrency = resolveDependencySearchConcurrency(options, targets.length);
 
   if (!options.classPath) {
     const shouldSearch = await confirm({
-      message: `确认开始按类路径检索 ${targets.length} 个工作负载？`,
+      message: `确认开始按类路径检索 ${targets.length} 个工作负载？并发 ${concurrency}`,
       default: true
     });
     if (!shouldSearch) {
@@ -791,80 +765,201 @@ async function runDependencyClassSearchFlow(client: KubeSphereClient, options: D
   console.log(`  query:     ${query.raw}`);
   console.log(`  class:     ${query.classEntry}`);
   console.log(`  workload:  ${options.workload ?? options.service ?? "全部工作负载"}`);
+  console.log(`  并发:      ${concurrency}`);
 
   const progress = new ProgressBar();
   const hits: DependencyClassSearchCliHit[] = [];
   const skipped: Array<{ target: string; reason: string }> = [];
+  let completed = 0;
+  let active = 0;
+  const renderProgress = (current?: string) => {
+    progress.updateText(
+      `类路径检索  工作负载 ${completed}/${targets.length}  活跃 ${active}/${concurrency}  命中 ${hits.length}${
+        current ? `  当前 ${current}` : ""
+      }`
+    );
+  };
+  renderProgress();
 
-  for (const [index, target] of targets.entries()) {
-    progress.updateText(`类路径检索  工作负载 ${index + 1}/${targets.length}  命中 ${hits.length}  当前 ${target.name}`);
-
+  await runWithConcurrency(targets, concurrency, async (target) => {
+    active += 1;
+    renderProgress(target.name);
     try {
-      const pods = await client.listPodsForTarget(target);
-      if (pods.length === 0) {
-        skipped.push({ target: target.name, reason: "没有匹配的 Pod" });
-        continue;
-      }
-
-      const pod = options.pod ? await choosePod(pods, options.pod) : preferredScanPod(pods);
-      const containers = options.container
-        ? pod.containers.includes(options.container)
-          ? [options.container]
-          : []
-        : pod.containers;
-      if (containers.length === 0) {
-        skipped.push({
-          target: target.name,
-          reason: options.container
-            ? `Pod ${pod.name} 中没有容器 ${options.container}`
-            : `Pod ${pod.name} 没有可选容器`
-        });
-        continue;
-      }
-
-      for (const container of containers) {
-        const candidates = options.jarPath
-          ? [{ source: "provided" as const, path: options.jarPath }]
-          : await discoverJarCandidates(client, {
-              namespace,
-              pod: pod.name,
-              container
-            });
-
-        if (candidates.length === 0) {
-          skipped.push({ target: `${target.name}/${container}`, reason: "没有发现 jar/war" });
-          continue;
-        }
-
-        for (const candidate of candidates) {
-          const archiveHits = await searchClassInArchive({
-            client,
-            target: {
-              namespace,
-              pod: pod.name,
-              container
-            },
-            archivePath: candidate.path,
-            query
-          });
-
-          hits.push(
-            ...archiveHits.map((hit) => ({
-              ...hit,
-              target,
-              pod,
-              container
-            }))
-          );
-        }
-      }
-    } catch (error) {
-      skipped.push({ target: target.name, reason: error instanceof Error ? error.message : String(error) });
+      const result = await scanDependencyClassTarget(client, namespace, options, target, query);
+      hits.push(...result.hits);
+      skipped.push(...result.skipped);
+    } finally {
+      active -= 1;
+      completed += 1;
+      renderProgress(target.name);
     }
-  }
+  });
 
   progress.done(`类路径检索完成：命中 ${hits.length}，跳过 ${skipped.length}`);
   printDependencyClassSearchResult(query.raw, query.classEntry, hits, skipped);
+}
+
+async function scanDependencyTarget(
+  client: KubeSphereClient,
+  namespace: string,
+  options: DepsOptions,
+  target: KubeTarget,
+  query: DependencySearchQuery
+): Promise<DependencySearchTargetResult> {
+  const hits: DependencySearchCliHit[] = [];
+  const skipped: Array<{ target: string; reason: string }> = [];
+
+  try {
+    const targetContext = await resolveDependencyScanTarget(client, namespace, options, target);
+    if ("skipped" in targetContext) {
+      skipped.push(targetContext.skipped);
+      return { hits, skipped };
+    }
+
+    for (const containerContext of targetContext.containers) {
+      for (const candidate of containerContext.candidates) {
+        const archiveHits = await searchDependencyInArchive({
+          client,
+          target: {
+            namespace,
+            pod: targetContext.pod.name,
+            container: containerContext.container
+          },
+          archivePath: candidate.path,
+          query
+        });
+
+        hits.push(
+          ...archiveHits.map((hit) => ({
+            ...hit,
+            target,
+            pod: targetContext.pod,
+            container: containerContext.container
+          }))
+        );
+      }
+    }
+  } catch (error) {
+    skipped.push({ target: target.name, reason: error instanceof Error ? error.message : String(error) });
+  }
+
+  return { hits, skipped };
+}
+
+async function scanDependencyClassTarget(
+  client: KubeSphereClient,
+  namespace: string,
+  options: DepsOptions,
+  target: KubeTarget,
+  query: DependencyClassSearchQuery
+): Promise<DependencyClassSearchTargetResult> {
+  const hits: DependencyClassSearchCliHit[] = [];
+  const skipped: Array<{ target: string; reason: string }> = [];
+
+  try {
+    const targetContext = await resolveDependencyScanTarget(client, namespace, options, target);
+    if ("skipped" in targetContext) {
+      skipped.push(targetContext.skipped);
+      return { hits, skipped };
+    }
+
+    for (const containerContext of targetContext.containers) {
+      for (const candidate of containerContext.candidates) {
+        const archiveHits = await searchClassInArchive({
+          client,
+          target: {
+            namespace,
+            pod: targetContext.pod.name,
+            container: containerContext.container
+          },
+          archivePath: candidate.path,
+          query
+        });
+
+        hits.push(
+          ...archiveHits.map((hit) => ({
+            ...hit,
+            target,
+            pod: targetContext.pod,
+            container: containerContext.container
+          }))
+        );
+      }
+    }
+  } catch (error) {
+    skipped.push({ target: target.name, reason: error instanceof Error ? error.message : String(error) });
+  }
+
+  return { hits, skipped };
+}
+
+async function resolveDependencyScanTarget(
+  client: KubeSphereClient,
+  namespace: string,
+  options: DepsOptions,
+  target: KubeTarget
+): Promise<
+  | {
+      pod: PodSummary;
+      containers: Array<{
+        container: string;
+        candidates: Array<{ source: "provided" | "process" | "scan"; path: string }>;
+      }>;
+    }
+  | { skipped: { target: string; reason: string } }
+> {
+  const pods = await client.listPodsForTarget(target);
+  if (pods.length === 0) {
+    return { skipped: { target: target.name, reason: "没有匹配的 Pod" } };
+  }
+
+  const pod = options.pod ? await choosePod(pods, options.pod) : preferredScanPod(pods);
+  const containers = options.container
+    ? pod.containers.includes(options.container)
+      ? [options.container]
+      : []
+    : pod.containers;
+  if (containers.length === 0) {
+    return {
+      skipped: {
+        target: target.name,
+        reason: options.container ? `Pod ${pod.name} 中没有容器 ${options.container}` : `Pod ${pod.name} 没有可选容器`
+      }
+    };
+  }
+
+  const containerContexts: Array<{
+    container: string;
+    candidates: Array<{ source: "provided" | "process" | "scan"; path: string }>;
+  }> = [];
+  for (const container of containers) {
+    const candidates = options.jarPath
+      ? [{ source: "provided" as const, path: options.jarPath }]
+      : await discoverJarCandidates(client, {
+          namespace,
+          pod: pod.name,
+          container
+        });
+
+    if (candidates.length === 0) {
+      continue;
+    }
+    containerContexts.push({ container, candidates });
+  }
+
+  if (containerContexts.length === 0) {
+    return {
+      skipped: {
+        target: target.name,
+        reason: containers.length === 1 ? `${target.name}/${containers[0]}: 没有发现 jar/war` : "没有发现 jar/war"
+      }
+    };
+  }
+
+  return {
+    pod,
+    containers: containerContexts
+  };
 }
 
 async function dependencySearchTargets(
@@ -878,6 +973,34 @@ async function dependencySearchTargets(
   }
 
   return client.listTargets(namespace);
+}
+
+function resolveDependencySearchConcurrency(options: DepsOptions, targetCount: number): number {
+  const requested = options.concurrency ?? 4;
+  const maxConcurrency = 8;
+  return Math.max(1, Math.min(requested, maxConcurrency, Math.max(1, targetCount)));
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) {
+          return;
+        }
+        const item = items[index] as T;
+        await worker(item, index);
+      }
+    })
+  );
 }
 
 function preferredScanPod(pods: PodSummary[]): PodSummary {
