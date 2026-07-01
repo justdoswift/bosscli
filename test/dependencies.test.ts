@@ -49,6 +49,8 @@ describe("dependencies", () => {
     expect(command).toContain("/proc/[0-9]*/cmdline");
     expect(command).toContain("awk 'prev == \"-jar\"");
     expect(command).toContain("find '/app' -maxdepth 5 -type f -name '*.jar'");
+    expect(command).toContain("|| true");
+    expect(command.endsWith("exit 0")).toBe(true);
   });
 
   it("builds dependency output directories", () => {

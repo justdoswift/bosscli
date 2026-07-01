@@ -80,8 +80,9 @@ export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS)
     "done",
     ...scanDirs.map(
       (dir) =>
-        `[ -d ${shellQuote(dir)} ] && find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/'`
-    )
+        `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`
+    ),
+    "exit 0"
   ].join("\n");
 }
 

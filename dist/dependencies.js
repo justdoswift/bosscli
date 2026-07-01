@@ -21,7 +21,8 @@ export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS)
         "  esac",
         "  [ -f \"$jar_path\" ] && printf 'process\\t%s\\n' \"$jar_path\"",
         "done",
-        ...scanDirs.map((dir) => `[ -d ${shellQuote(dir)} ] && find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/'`)
+        ...scanDirs.map((dir) => `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 5 -type f -name '*.jar' -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`),
+        "exit 0"
     ].join("\n");
 }
 export function parseJarCandidateLines(output) {
