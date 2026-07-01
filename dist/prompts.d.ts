@@ -13,6 +13,7 @@ export interface ConnectionAnswers {
 export type BosscliFeature = "logs" | "leqi" | "lexiang" | "leqi-sm4" | "get-hash-code" | "redis" | "mysql-backup" | "deps" | "middle-db-mock" | "file-share" | "exit";
 export type RedisActionChoice = RedisAction | "switch-db" | "back";
 export type LexiangNextAction = "continue" | "switch-catalog" | "switch-profile" | "home" | "exit";
+export type DependencyAction = "export" | "search";
 export type ProfileChoice = {
     kind: "saved";
     profile: SavedProfile;
@@ -36,6 +37,8 @@ export declare function promptConnection(defaults: Partial<ConnectionAnswers>): 
 export declare function promptNewProfileName(existingNames: string[]): Promise<string>;
 export declare function preferredNamespace(namespaces: string[], preferred?: string): string | undefined;
 export declare function chooseBosscliFeature(defaultFeature?: BosscliFeature): Promise<BosscliFeature>;
+export declare function chooseDependencyAction(provided?: DependencyAction): Promise<DependencyAction>;
+export declare function promptDependencySearchQuery(provided?: string): Promise<string>;
 export declare function chooseLexiangProfile(profiles: LexiangProfile[], defaultProfile?: string): Promise<LexiangProfileChoice>;
 export declare function chooseLexiangCatalog(catalogs: LexiangCatalogInfo[]): Promise<LexiangCatalogInfo>;
 export declare function chooseMySqlProfile(profiles: MySqlProfile[], defaultProfile?: string): Promise<MySqlProfileChoice>;

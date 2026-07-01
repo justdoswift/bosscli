@@ -316,9 +316,23 @@ bosscli mysql-backup \
 bosscli deps
 ```
 
-依赖获取会登录 KubeSphere，选择 namespace、工作负载、Pod 和容器后，从运行中的 Java 进程或常见目录中查找应用 jar/war。工具会把应用包下载到本机，并在本机解析 `BOOT-INF/lib`、`WEB-INF/lib`、`lib` 中的依赖 jar，不依赖容器内安装 `jar` 或 `unzip`。
+依赖获取进入后会先选择 `导出依赖` 或 `检索依赖`。
+
+`导出依赖` 会登录 KubeSphere，选择 namespace、工作负载、Pod 和容器后，从运行中的 Java 进程或常见目录中查找应用 jar/war。工具会把应用包下载到本机，并在本机解析 `BOOT-INF/lib`、`WEB-INF/lib`、`lib` 中的依赖 jar，不依赖容器内安装 `jar` 或 `unzip`。
 
 工作负载和应用 jar/war 选择支持直接输入关键字搜索，方便在服务较多时快速定位。
+
+`检索依赖` 不下载完整应用包，会在当前 namespace 的所有工作负载里列出 jar/war 包内容并匹配依赖 jar 名称。依赖关键词是普通输入框，按回车并确认后才开始扫描，不会监听输入变化。可以输入完整 Maven 坐标，也可以模糊输入 artifactId：
+
+```bash
+bosscli deps \
+  --profile 测试环境 \
+  --namespace tax-digital \
+  --deps-action search \
+  --search business-reimburse-sdk
+```
+
+完整坐标如 `com.bosssoft:business-reimburse-sdk:1.3.20` 会优先按 `business-reimburse-sdk-1.3.20.jar` 精确匹配。这个模式依赖容器内有 `unzip` 或 `jar` 命令来列包内容；如果没有，会跳过对应目标并给出原因。
 
 默认输出到：
 

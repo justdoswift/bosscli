@@ -54,13 +54,33 @@ export interface DependencyExportProgress {
     totalBytes?: number;
     method?: "direct" | "stable";
 }
+export interface DependencySearchQuery {
+    raw: string;
+    artifactId?: string;
+    version?: string;
+    exactJarName?: string;
+    fuzzyTerms: string[];
+}
+export interface DependencySearchHit {
+    archivePath: string;
+    entry: string;
+}
 export declare function buildDiscoverJarCommand(scanDirs?: string[]): string;
 export declare function buildDiscoverTopLevelArchiveCommand(scanDirs?: string[]): string;
+export declare function parseDependencySearchQuery(rawQuery: string): DependencySearchQuery;
+export declare function dependencyEntryMatches(query: DependencySearchQuery, entry: string): boolean;
+export declare function buildListArchiveEntriesCommand(archivePath: string): string;
 export declare function parseJarCandidateLines(output: string): JarCandidate[];
 export declare function jarPathFromJavaArgs(args: string[], cwd?: string): string | undefined;
 export declare function sortJarCandidates(candidates: JarCandidate[]): JarCandidate[];
 export declare function buildDependencyOutputDir(homeDir: string, target: Pick<DependencyTarget, "namespace" | "workload">, date?: Date): string;
 export declare function discoverJarCandidates(client: KubeSphereClient, target: Omit<DependencyTarget, "workload">): Promise<JarCandidate[]>;
+export declare function searchDependencyInArchive(options: {
+    client: KubeSphereClient;
+    target: Omit<DependencyTarget, "workload">;
+    archivePath: string;
+    query: DependencySearchQuery;
+}): Promise<DependencySearchHit[]>;
 export declare function runReadOnlyExecWithRetry<T>(operation: () => Promise<T>, options?: {
     attempts?: number;
     delayMs?: number;

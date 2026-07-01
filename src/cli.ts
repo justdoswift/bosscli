@@ -22,6 +22,7 @@ import {
   chooseLogRange,
   chooseLogSource,
   chooseMySqlProfile,
+  chooseDependencyAction,
   chooseJarCandidate,
   chooseNamespace,
   choosePod,
@@ -34,12 +35,13 @@ import {
   promptLexiangProfile,
   promptLeqiReqDto,
   promptConnection,
+  promptDependencySearchQuery,
   promptMySqlBackupDatabases,
   promptMySqlProfile,
   promptNewProfileName,
   promptRedisOperation
 } from "./prompts.js";
-import type { BosscliFeature, ConnectionAnswers } from "./prompts.js";
+import type { BosscliFeature, ConnectionAnswers, DependencyAction } from "./prompts.js";
 import {
   getProfile,
   readProfiles,
@@ -77,7 +79,10 @@ import {
 import {
   buildDependencyOutputDir,
   discoverJarCandidates,
-  exportJavaDependencies
+  exportJavaDependencies,
+  parseDependencySearchQuery,
+  searchDependencyInArchive,
+  type DependencySearchHit
 } from "./dependencies.js";
 import { formatDuration, formatProgressRate, formatTableProgressPercent, ProgressBar } from "./progress.js";
 import { copyToClipboard } from "./clipboard.js";
@@ -190,7 +195,15 @@ interface RedisOptions extends ConnectionOptions, KubeTargetOptions {
 interface DepsOptions extends ConnectionOptions, KubeTargetOptions {
   jarPath?: string;
   outputDir?: string;
+  depsAction?: DependencyAction;
+  search?: string;
 }
+
+type DependencySearchCliHit = DependencySearchHit & {
+  target: KubeTarget;
+  pod: PodSummary;
+  container: string;
+};
 
 interface MySqlBackupCliOptions {
   profile?: string;
@@ -477,6 +490,8 @@ function addDepsOptions(command: Command): void {
     .option("--pod <pod>", "Pod 名称")
     .option("-c, --container <container>", "容器名称")
     .option("--jar-path <path>", "容器内应用 jar/war 路径")
+    .addOption(new Option("--deps-action <action>", "依赖操作").choices(["export", "search"]))
+    .option("--search <query>", "检索依赖坐标或关键词，例如 business-reimburse-sdk")
     .option("-o, --output-dir <dir>", "输出目录");
 }
 
@@ -518,6 +533,16 @@ async function runDepsFlow(options: DepsOptions): Promise<void> {
   const { client, connection } = await loginFromOptions(options);
   console.log(`已登录：${connection.username} @ ${connection.baseUrl}`);
 
+  const action = await chooseDependencyAction(options.depsAction ?? (options.search ? "search" : undefined));
+  if (action === "search") {
+    await runDependencySearchFlow(client, options);
+    return;
+  }
+
+  await runDependencyExportFlow(client, options);
+}
+
+async function runDependencyExportFlow(client: KubeSphereClient, options: DepsOptions): Promise<void> {
   const { namespace, target, pod, container } = await chooseKubeTarget(client, options);
   const candidates = options.jarPath
     ? []
@@ -606,6 +631,221 @@ async function runDepsFlow(options: DepsOptions): Promise<void> {
     }
     throw error;
   }
+}
+
+async function runDependencySearchFlow(client: KubeSphereClient, options: DepsOptions): Promise<void> {
+  const namespaces = await client.listNamespaces();
+  if (namespaces.length === 0) {
+    throw new Error("当前账号没有可见 namespace");
+  }
+
+  const namespace = await chooseNamespace(namespaces, options.namespace);
+  const queryText = await promptDependencySearchQuery(options.search);
+  const query = parseDependencySearchQuery(queryText);
+  const targets = await dependencySearchTargets(client, namespace, options);
+
+  if (targets.length === 0) {
+    throw new Error(`namespace ${namespace} 中没有可检索的工作负载`);
+  }
+
+  if (!options.search) {
+    const shouldSearch = await confirm({
+      message: `确认开始检索 ${targets.length} 个工作负载？`,
+      default: true
+    });
+    if (!shouldSearch) {
+      console.log("已取消依赖检索");
+      return;
+    }
+  }
+
+  console.log("开始检索依赖：");
+  console.log(`  namespace: ${namespace}`);
+  console.log(`  query:     ${query.raw}`);
+  if (query.exactJarName) {
+    console.log(`  jar:       ${query.exactJarName}`);
+  }
+  console.log(`  workload:  ${options.workload ?? options.service ?? "全部工作负载"}`);
+
+  const progress = new ProgressBar();
+  const hits: DependencySearchCliHit[] = [];
+  const skipped: Array<{ target: string; reason: string }> = [];
+
+  for (const [index, target] of targets.entries()) {
+    progress.updateText(`依赖检索  工作负载 ${index + 1}/${targets.length}  命中 ${hits.length}  当前 ${target.name}`);
+
+    try {
+      const pods = await client.listPodsForTarget(target);
+      if (pods.length === 0) {
+        skipped.push({ target: target.name, reason: "没有匹配的 Pod" });
+        continue;
+      }
+
+      const pod = options.pod ? await choosePod(pods, options.pod) : preferredScanPod(pods);
+      const containers = options.container
+        ? pod.containers.includes(options.container)
+          ? [options.container]
+          : []
+        : pod.containers;
+      if (containers.length === 0) {
+        skipped.push({
+          target: target.name,
+          reason: options.container
+            ? `Pod ${pod.name} 中没有容器 ${options.container}`
+            : `Pod ${pod.name} 没有可选容器`
+        });
+        continue;
+      }
+
+      for (const container of containers) {
+        const candidates = options.jarPath
+          ? [{ source: "provided" as const, path: options.jarPath }]
+          : await discoverJarCandidates(client, {
+              namespace,
+              pod: pod.name,
+              container
+            });
+
+        if (candidates.length === 0) {
+          skipped.push({ target: `${target.name}/${container}`, reason: "没有发现 jar/war" });
+          continue;
+        }
+
+        for (const candidate of candidates) {
+          const archiveHits = await searchDependencyInArchive({
+            client,
+            target: {
+              namespace,
+              pod: pod.name,
+              container
+            },
+            archivePath: candidate.path,
+            query
+          });
+
+          hits.push(
+            ...archiveHits.map((hit) => ({
+              ...hit,
+              target,
+              pod,
+              container
+            }))
+          );
+        }
+      }
+    } catch (error) {
+      skipped.push({ target: target.name, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  progress.done(`依赖检索完成：命中 ${hits.length}，跳过 ${skipped.length}`);
+  printDependencySearchResult(query.raw, hits, skipped);
+}
+
+async function dependencySearchTargets(
+  client: KubeSphereClient,
+  namespace: string,
+  options: DepsOptions
+): Promise<KubeTarget[]> {
+  const workloadName = options.workload ?? options.service;
+  if (workloadName) {
+    return [await client.resolveTarget(namespace, workloadName)];
+  }
+
+  return client.listTargets(namespace);
+}
+
+function preferredScanPod(pods: PodSummary[]): PodSummary {
+  const readyRunningPod = pods.find((pod) => pod.phase === "Running" && podIsReady(pod));
+  return readyRunningPod ?? pods.find((pod) => pod.phase === "Running") ?? pods[0]!;
+}
+
+function podIsReady(pod: PodSummary): boolean {
+  const [ready, total] = pod.ready.split("/").map((value) => Number.parseInt(value, 10));
+  return Number.isFinite(ready) && Number.isFinite(total) && total > 0 && ready === total;
+}
+
+function printDependencySearchResult(
+  query: string,
+  hits: DependencySearchCliHit[],
+  skipped: Array<{ target: string; reason: string }>
+): void {
+  if (hits.length === 0) {
+    console.log(`未命中依赖：${query}`);
+  } else {
+    console.log(`命中依赖：${query}`);
+    const groupedHits = groupDependencySearchHits(hits);
+    for (const group of groupedHits) {
+      console.log(`\n${group.namespace} / ${group.workload}`);
+      console.log(`  Pod：${group.pod}`);
+      console.log(`  容器：${group.container}`);
+      for (const archive of group.archives) {
+        console.log(`  包：${archive.archivePath}`);
+        for (const entry of archive.entries) {
+          console.log(`    - ${entry}`);
+        }
+      }
+    }
+  }
+
+  if (skipped.length > 0) {
+    console.log(`\n跳过 ${skipped.length} 个目标：`);
+    for (const item of skipped.slice(0, 20)) {
+      console.log(`- ${item.target}: ${item.reason}`);
+    }
+    if (skipped.length > 20) {
+      console.log(`... 还有 ${skipped.length - 20} 个跳过目标`);
+    }
+  }
+}
+
+function groupDependencySearchHits(hits: DependencySearchCliHit[]): Array<{
+  namespace: string;
+  workload: string;
+  pod: string;
+  container: string;
+  archives: Array<{ archivePath: string; entries: string[] }>;
+}> {
+  const groups = new Map<
+    string,
+    {
+      namespace: string;
+      workload: string;
+      pod: string;
+      container: string;
+      archiveMap: Map<string, Set<string>>;
+    }
+  >();
+
+  for (const hit of hits) {
+    const key = `${hit.target.namespace}\0${hit.target.name}\0${hit.pod.name}\0${hit.container}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        namespace: hit.target.namespace,
+        workload: hit.target.name,
+        pod: hit.pod.name,
+        container: hit.container,
+        archiveMap: new Map()
+      };
+      groups.set(key, group);
+    }
+
+    const entries = group.archiveMap.get(hit.archivePath) ?? new Set<string>();
+    entries.add(hit.entry);
+    group.archiveMap.set(hit.archivePath, entries);
+  }
+
+  return [...groups.values()].map((group) => ({
+    namespace: group.namespace,
+    workload: group.workload,
+    pod: group.pod,
+    container: group.container,
+    archives: [...group.archiveMap.entries()].map(([archivePath, entries]) => ({
+      archivePath,
+      entries: [...entries].sort()
+    }))
+  }));
 }
 
 async function runLeqiFlow(options: LeqiOptions): Promise<void> {

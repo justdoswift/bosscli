@@ -74,6 +74,21 @@ export interface DependencyExportProgress {
   method?: "direct" | "stable";
 }
 
+export interface DependencySearchQuery {
+  raw: string;
+  artifactId?: string;
+  version?: string;
+  exactJarName?: string;
+  fuzzyTerms: string[];
+}
+
+export interface DependencySearchHit {
+  archivePath: string;
+  entry: string;
+}
+
+const NO_ARCHIVE_LISTER_MARKER = "__BOSSCLI_NO_ARCHIVE_LISTER__";
+
 export function buildDiscoverJarCommand(scanDirs = DEFAULT_DEPENDENCY_SCAN_DIRS): string {
   const findArchiveExpression = "\\( -name '*.jar' -o -name '*.war' \\)";
 
@@ -108,6 +123,60 @@ export function buildDiscoverTopLevelArchiveCommand(
       (dir) =>
         `if [ -d ${shellQuote(dir)} ]; then find ${shellQuote(dir)} -maxdepth 1 -type f ${findArchiveExpression} -print 2>/dev/null | sed 's/^/scan\\t/' || true; fi`
     ),
+    "exit 0"
+  ].join("\n");
+}
+
+export function parseDependencySearchQuery(rawQuery: string): DependencySearchQuery {
+  const raw = rawQuery.trim();
+  if (!raw) {
+    throw new Error("依赖关键词不能为空");
+  }
+
+  const parts = raw.split(":").map((part) => part.trim()).filter(Boolean);
+  const artifactId = parts.length >= 2 ? parts[1] : undefined;
+  const version = parts.length >= 3 ? parts[2] : undefined;
+  const exactJarName = artifactId && version ? `${artifactId}-${version}.jar` : undefined;
+  const fuzzySource = exactJarName ?? artifactId ?? raw;
+  const fuzzyTerms = fuzzySource
+    .toLowerCase()
+    .split(/[^a-z0-9_.-]+/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return {
+    raw,
+    artifactId,
+    version,
+    exactJarName,
+    fuzzyTerms
+  };
+}
+
+export function dependencyEntryMatches(query: DependencySearchQuery, entry: string): boolean {
+  const fileName = path.posix.basename(entry).toLowerCase();
+  if (!fileName.endsWith(".jar")) {
+    return false;
+  }
+
+  if (query.exactJarName) {
+    return fileName === query.exactJarName.toLowerCase();
+  }
+
+  const normalizedFileName = normalizeDependencySearchText(fileName);
+  return query.fuzzyTerms.every((term) => normalizedFileName.includes(normalizeDependencySearchText(term)));
+}
+
+export function buildListArchiveEntriesCommand(archivePath: string): string {
+  const quotedArchivePath = shellQuote(archivePath);
+  return [
+    "if command -v unzip >/dev/null 2>&1; then",
+    `  unzip -Z1 ${quotedArchivePath} 2>/dev/null || unzip -l ${quotedArchivePath} 2>/dev/null | awk 'NR > 3 && $4 != \"\" && $4 !~ /^-+$/ { print $4 }'`,
+    "elif command -v jar >/dev/null 2>&1; then",
+    `  jar tf ${quotedArchivePath} 2>/dev/null`,
+    "else",
+    `  echo ${NO_ARCHIVE_LISTER_MARKER}`,
+    "fi",
     "exit 0"
   ].join("\n");
 }
@@ -183,6 +252,38 @@ export async function discoverJarCandidates(
   const result = await runDiscoveryCommand(client, target, buildDiscoverJarCommand(), 60000);
 
   return candidatesFromDiscoveryResult(result);
+}
+
+export async function searchDependencyInArchive(options: {
+  client: KubeSphereClient;
+  target: Omit<DependencyTarget, "workload">;
+  archivePath: string;
+  query: DependencySearchQuery;
+}): Promise<DependencySearchHit[]> {
+  const result = await runRemoteTextCommand(
+    options.client,
+    options.target,
+    buildListArchiveEntriesCommand(options.archivePath),
+    60000
+  );
+
+  const error = result.error.trim() || (result.stderr.trim() && !result.stdout.trim() ? result.stderr.trim() : "");
+  if (error) {
+    throw new Error(error);
+  }
+
+  if (result.stdout.includes(NO_ARCHIVE_LISTER_MARKER)) {
+    throw new Error("容器中没有 unzip 或 jar，无法在不下载应用包的情况下检索依赖");
+  }
+
+  return result.stdout
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => dependencyEntryMatches(options.query, entry))
+    .map((entry) => ({
+      archivePath: options.archivePath,
+      entry
+    }));
 }
 
 async function runDiscoveryCommand(
@@ -808,6 +909,10 @@ function isTransientExecError(error: unknown): boolean {
 
 function isRecoverableDownloadError(error: unknown): boolean {
   return error instanceof DownloadSizeMismatchError || isTransientExecError(error);
+}
+
+function normalizeDependencySearchText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 class DownloadSizeMismatchError extends Error {

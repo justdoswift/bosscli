@@ -9,13 +9,17 @@ import {
   buildDependencyOutputDir,
   buildDiscoverJarCommand,
   buildDiscoverTopLevelArchiveCommand,
+  buildListArchiveEntriesCommand,
+  dependencyEntryMatches,
   discoverJarCandidates,
   downloadRemoteFile,
   formatDependenciesText,
   jarPathFromJavaArgs,
+  parseDependencySearchQuery,
   parseJarCandidateLines,
   parsePomProperties,
   runReadOnlyExecWithRetry,
+  searchDependencyInArchive,
   sortJarCandidates,
   type DependencyJarInfo
 } from "../src/dependencies.js";
@@ -68,6 +72,68 @@ describe("dependencies", () => {
     expect(command).toContain("find '/opt/saas' -maxdepth 1 -type f \\( -name '*.jar' -o -name '*.war' \\)");
     expect(command).not.toContain("/proc/[0-9]*/cmdline");
     expect(command.endsWith("exit 0")).toBe(true);
+  });
+
+  it("parses dependency search queries and matches jar entries", () => {
+    const exact = parseDependencySearchQuery("com.bosssoft:business-reimburse-sdk:1.3.20");
+    expect(exact).toMatchObject({
+      artifactId: "business-reimburse-sdk",
+      version: "1.3.20",
+      exactJarName: "business-reimburse-sdk-1.3.20.jar"
+    });
+    expect(dependencyEntryMatches(exact, "BOOT-INF/lib/business-reimburse-sdk-1.3.20.jar")).toBe(true);
+    expect(dependencyEntryMatches(exact, "BOOT-INF/lib/business-reimburse-sdk-1.3.21.jar")).toBe(false);
+
+    const fuzzy = parseDependencySearchQuery("business-reimburse-sdk");
+    expect(dependencyEntryMatches(fuzzy, "WEB-INF/lib/business-reimburse-sdk-1.3.20.jar")).toBe(true);
+    expect(dependencyEntryMatches(fuzzy, "WEB-INF/classes/application.yml")).toBe(false);
+
+    const artifactOnly = parseDependencySearchQuery("com.bosssoft:business-reimburse-sdk");
+    expect(dependencyEntryMatches(artifactOnly, "lib/business-reimburse-sdk-1.4.0.jar")).toBe(true);
+  });
+
+  it("builds archive listing command for no-download dependency search", () => {
+    const command = buildListArchiveEntriesCommand("/opt/saas/server.war");
+
+    expect(command).toContain("unzip -Z1 '/opt/saas/server.war'");
+    expect(command).toContain("jar tf '/opt/saas/server.war'");
+    expect(command).toContain("__BOSSCLI_NO_ARCHIVE_LISTER__");
+    expect(command.endsWith("exit 0")).toBe(true);
+  });
+
+  it("searches dependency entries in a remote archive listing", async () => {
+    const execCommand = vi.fn().mockResolvedValue({
+      stdout: [
+        "BOOT-INF/classes/application.yml",
+        "BOOT-INF/lib/business-reimburse-sdk-1.3.20.jar",
+        "BOOT-INF/lib/spring-core-6.1.0.jar"
+      ].join("\n"),
+      stderr: "",
+      error: ""
+    });
+
+    const hits = await searchDependencyInArchive({
+      client: { execCommand } as never,
+      target: {
+        namespace: "tax-digital",
+        pod: "server-xxx",
+        container: "container-server"
+      },
+      archivePath: "/opt/saas/server.war",
+      query: parseDependencySearchQuery("business-reimburse-sdk")
+    });
+
+    expect(hits).toEqual([
+      {
+        archivePath: "/opt/saas/server.war",
+        entry: "BOOT-INF/lib/business-reimburse-sdk-1.3.20.jar"
+      }
+    ]);
+    expect(execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.arrayContaining(["sh", "-lc"])
+      })
+    );
   });
 
   it("uses top-level archive discovery before full recursive discovery", async () => {
